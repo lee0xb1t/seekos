@@ -1,0 +1,52 @@
+TCP IP Users Guide                May 1982
+                   Sending and Receiving Data
+
+
+   Data is transferred between  the  user  and  TCP  in  buffers.
+Associated  with  each  buffer  is a Buffer Header which contains
+control information.  Data to be  sent  to  the  foreign  end  is
+placed  into  one  or  more  buffers,  the associated headers are
+filled in, and the address of each Buffer Header is passed to TCP
+using the SEND JSYS.
+
+   The TCP collects data from the user buffers and decides, based
+on the current window, etc., when to create a packet and transmit
+it to the foreign end.  The user can force TCP to  transmit  data
+in  a  buffer  by  setting  the  PUSH flag, TCP%PU, in the Buffer
+Header before doing the SEND.
+
+   When TCP has finished extracting the data from a  SEND  buffer
+it  sets  the  DONE  flag,  TCP%DN,  in  the  Buffer  Header  and
+optionally generates an interrupt.  It is also possible to  cause
+a  process  to block until a buffer has been processed by setting
+the TCP%WT flag in AC1; the TCP%PU flag should also be set in the
+Buffer Header.  Beware of the  trap  of  setting  TCP%WT  without
+TCP%PU--the  process  may  be blocked forever.  The SEND will not
+return control to the user program until the data has been placed
+into a packet and, due to the presence of TCP%PU, sent.
+
+   Data is received from the foreign end  by  first  passing  TCP
+(one or more) empty buffers using the RECV JSYS.  The TCP%WT flag
+may  be  specified  if control should not be returned to the user
+program until the buffer has been filled.  When data arrives, TCP
+places it into the buffers.
+
+   RECV buffers are returned to the user either when full or when
+a packet arrives which has the PUSH flag set.  Before returning a
+buffer, TCP sets the TCP%DN flag and places an error code in  the
+Buffer  Header.   The  TCP%PU  flag  will be set if the buffer is
+being returned because the received packet had the PUSH flag set.
+(The buffer might not be full in this case.)
+
+   It is only possible to send and receive whole octets.   If  an
+application requires transfer of some number of bits which is not
+a multiple of eight, then control information must be placed into
+the data stream.  Note the PUSH function cannot be used to signal
+the  other  end  of  "record  boundaries";  the  number of (RECV)
+buffers with TCP%PU set may be less than  the  number  of  PUSHes
+received  which  may  be  less  than the number of (SEND) buffers
+which had the TCP%PU flag set.
+
+    Several buffers may be passed to TCP using SEND  and/or  RECV
+if  the  non-blocking  form of the calls is used. (TCP%WT was not
+set in AC1.)

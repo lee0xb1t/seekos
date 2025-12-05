@@ -1,0 +1,16 @@
+build/
+.vscode
+*.bin
+*.elf
+*.o
+*.img
+*.efi
+obj/
+bin/
+log.txt
+limine
+limine-protocol
+release
+ramdisk
+initrd
+.vscode/settings.json
