@@ -1,0 +1,65 @@
+{
+    // 使用 IntelliSense 了解相关属性。 
+    // 悬停以查看现有属性的描述。
+    // 欲了解更多信息，请访问: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "kernel-debug",
+            "type": "cppdbg",
+            "request": "launch",
+            // "miDebuggerPath": "x86_64-elf-gdb",
+            "miDebuggerServerAddress": "localhost:1234",
+            "program": "${workspaceFolder}/kernel/kernel.elf",
+            "targetArchitecture": "x64",
+            "args": [],
+            "stopAtEntry": false,
+            "stopAtConnect": true,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "logging": {
+                "engineLogging": true
+            },
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "pretty print",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                },
+                {
+                    "text": "set arch i386:x86-64:intel"
+                }
+            ],
+            "postRemoteConnectCommands": [
+                // {
+                //     "text": "add-symbol-file ${workspaceFolder}/kernel/kernel.elf 0x1000000"
+                // },
+                {
+                    "text": "add-symbol-file ${workspaceFolder}/kernel/kernel.elf 0xffffffff80000000"
+                },
+                {
+                    "text": "add-symbol-file ${workspaceFolder}/user/shell 0x400000"
+                },
+                
+                // {
+                //     "text": "b *0xffffffff80000000"
+                // },
+                {
+                    "text": "b kernel/src/main.c:kernel_main"
+                },
+                {
+                    "text": "-exec-until kernel/src/main.c:kernel_main"
+                },
+
+                // {
+                //     "text": "b user/shell.c:main"
+                // },
+                // {
+                //     "text": "-exec-until user/shell.c:main"
+                // }
+            ],
+        }
+    ]
+}

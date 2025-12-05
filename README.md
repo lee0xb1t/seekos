@@ -1,6 +1,9 @@
 
 A project to learn osdev
 
+
+## FEATURES
+
 * buddy system
 * slab
 * LinkedList memory allocator
