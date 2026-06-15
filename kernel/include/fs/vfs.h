@@ -175,7 +175,7 @@ i32 vfs_close_console(vfs_handle_t fh);
 
 void vfs_init();
 
-void vfs_copy(linked_list_t *p);
+void vfs_copy(task_t *dest, linked_list_t *src);
 
 
 #endif

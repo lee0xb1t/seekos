@@ -174,9 +174,9 @@ vfs_dentry_t *vfs_resolve_path(const char *path, u8 mode) {
             current = (vfs_dentry_t *)kzalloc(sizeof(vfs_dentry_t));
             memcpy(current->d_name, nextpath, strlen(nextpath));
 
-            if (parent->d_inode->i_ops->lookup(parent->d_inode, current) == null) {
-                // not found file or dir
-                kloge("[VFS] not found file or dir (%s)\n", whole_path);
+            if (!parent->d_inode || !parent->d_inode->i_ops ||
+                parent->d_inode->i_ops->lookup(parent->d_inode, current) == null) {
+                kloge("[VFS] not found file or dir (%s), component=%s\n", whole_path, nextpath);
                 kfree(current);
                 current = null;
                 goto _end;
@@ -551,13 +551,11 @@ vfs_handle_t vfs_close_console(vfs_handle_t fh) {
     return r;
 }
 
-void vfs_copy(linked_list_t *p) {
+void vfs_copy(task_t *dest, linked_list_t *src) {
 
     spin_lock(&vfs_lock);
 
-    task_t *t = sched_get_task();
-
-    dlist_foreach(p, entry) {
+    dlist_foreach(src, entry) {
         vfs_file_t *filep = dlist_container_of(entry, vfs_file_t, open_list_entry);
         if (!filep->is_console) {
             filep->count++;
@@ -565,7 +563,7 @@ void vfs_copy(linked_list_t *p) {
             *nf = *filep;
             dlist_init(&nf->open_list_entry);
             nf->f_pdata = null;
-            dlist_add_prev(&t->open_files, &nf->open_list_entry);
+            dlist_add_prev(&dest->open_files, &nf->open_list_entry);
         }
     }
 

@@ -314,7 +314,7 @@ void sched_add(task_t *t) {
 
 void sched_execve(const char *path, int argc, char **argv, char *cwd) {
     u64 flags;
-    char *exec_name;
+    char *exec_name = (char *)path;
 
     char temp_path[VFS_MAX_PATH_LENGTH] = {0};
     memcpy(temp_path, path, strlen(path));
@@ -362,12 +362,14 @@ void _sched_do_execve() {
     vfs_open_console("/dev/ttyfs", VFS_STDERR);
 
     if (task->is_fork) {
-        vfs_copy(&task->open_files); //TODO
         void *ustack = vmalloc(task->mm, null, TASK_STACK_SIZE_32KB, VMM_FLAGS_USER);
         task_setup_ustack(task, ustack, TASK_STACK_SIZE_32KB);
         task_setup_routine(task, task->auxv.entry);
     } else {
-        elf_load(task, task->execve_path);
+        if (elf_load(task, task->execve_path) != 0) {
+            sched_exit(-1);
+            return;
+        }
     }
 
     task_init_ustack(task);
@@ -421,7 +423,7 @@ u32 sched_fork() {
 
     task_t *n = task_fork(t);
 
-    vfs_copy(&n->open_files);
+    vfs_copy(n, &t->open_files);
 
     spin_unlock_irq(&sched_lock, flags);
 
@@ -467,7 +469,7 @@ i32 sched_wait(u32 tid) {
 
 u32 sched_spawn(const char *path, int argc, char **argv) {
     u64 flags;
-    char *exec_name;
+    char *exec_name = (char *)path;
 
     char temp_path[VFS_MAX_PATH_LENGTH] = {0};
     memcpy(temp_path, path, strlen(path));
@@ -478,12 +480,19 @@ u32 sched_spawn(const char *path, int argc, char **argv) {
         }
     }
 
+    char full_path[VFS_MAX_PATH_LENGTH] = {0};
+    if (temp_path[0] != '/') {
+        ksnprintf(full_path, sizeof(full_path), "/bin/%s", temp_path);
+    } else {
+        memcpy(full_path, temp_path, strlen(temp_path) + 1);
+    }
+
     spin_lock_irq(&sched_lock, flags);
 
     task_t *t = sched_get_task();
     
     task_t *task = task_create(exec_name, null, 255, TASK_USER_MODE);
-    task_setup_path(task, path);
+    task_setup_path(task, full_path);
     task_setup_argv(task, argc, argv);
     task_setup_cwd(task, t->cwd);
     task->tgid = t->tid;

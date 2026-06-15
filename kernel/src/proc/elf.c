@@ -15,7 +15,7 @@ i32 elf_load(task_t *t, const char* path) {
 
     spin_lock_irq(&elf_lock, flags);
 
-    vfs_handle_t fh = vfs_open(path, VFS_MODE_READWRITE);
+    vfs_handle_t fh = vfs_open(path, VFS_MODE_READ);
     if (fh == VFS_INVALID_HANDLE) {
         spin_unlock_irq(&elf_lock, flags);
         return -1;

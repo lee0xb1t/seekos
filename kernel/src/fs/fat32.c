@@ -185,6 +185,17 @@ static char to_upper(char c)
 }
 
 //------------------------------------------------------------------------------
+static bool name_eq(const void* a, const void* b, int len)
+{
+  const u8* p = a;
+  const char* q = b;
+  for (int i = 0; i < len; i++)
+    if (to_upper(p[i]) != to_upper(q[i]))
+      return false;
+  return true;
+}
+
+//------------------------------------------------------------------------------
 static int subpath_len(const char* path)
 {
   int i;
@@ -243,7 +254,7 @@ static Fat* find_fat_volume(const char* name, int len)
 {
   for (Fat* it = g_fat_list; it; it = it->next)
   {
-    if (len == it->name_len && !memcmp(name, it->name, len))
+    if (len == it->name_len && name_eq(name, it->name, len))
       return it;
   }
 
@@ -629,6 +640,8 @@ static char sfn_char(char c)
   c = to_upper(c);
   if (c >= 'A' && c <= 'Z')
     return c;
+  if (c >= '0' && c <= '9')
+    return c;
   
   for (int i = 0; str[i]; i++)
   {
@@ -708,9 +721,6 @@ static int parse_lfn_name(Dir* dir)
   Lfn* lfn = dir_ptr(dir);
   g_crc = lfn->crc;
   g_len = 0;
-
-  if (0 == (lfn->seq & LFN_HEAD_MSK))
-    return FAT_ERR_BROKEN;
 
   int cnt = lfn->seq & LFN_SEQ_MSK;
   if (cnt > 20)
@@ -793,7 +803,7 @@ static int dir_search(Dir* dir, const char* name, int len, Loc* loc)
       if (sfn_is_free(sfn) || sfn_is_lfn(sfn) || g_crc != get_crc(sfn->name))
         return FAT_ERR_BROKEN;
 
-      if (g_len == len && !memcmp(g_buf, name, len))
+      if (g_len == len && name_eq(g_buf, name, len))
         return FAT_ERR_NONE;
     }
     else

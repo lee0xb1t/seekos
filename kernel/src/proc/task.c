@@ -10,345 +10,291 @@
 #include <panic/panic.h>
 
 
-task_id_t global_id = 0;
+static task_id_t global_id = 0;
 DECLARE_SPINLOCK(global_id_lock);
-
 DECLARE_SPINLOCK(task_lock);
 
-extern void __sched_task_start();
-extern void __sched_task_start_user();
+extern void __sched_task_start(void);
+extern void __sched_task_start_user(void);
 
 
-task_t *task_create(const char *name, task_routine_t task_routine, 
-                    task_priority_t task_priority, task_mode_t mode) {
-
-    task_t *ntask = kzalloc(sizeof(task_t));
-
+static task_id_t _alloc_tid(void) {
+    task_id_t id;
     spin_lock(&global_id_lock);
-    ntask->tgid = ++global_id;
+    id = ++global_id;
     spin_unlock(&global_id_lock);
-
-    ntask->tid = ntask->tgid;
-
-    ntask->mm = mm_create();
-
-    ntask->priority = task_priority;
-    ntask->mode = mode;
-    ntask->state = TASK_READY;
-
-    strncpy(&ntask->name[0], name, TASK_MAX_NAME_LEN);
-
-    ntask->wakeup_event = (kevent_t *)kzalloc(sizeof(kevent_t));
-
-    dlist_init(&ntask->open_files);
-
-    if (mode == TASK_USER_MODE) {
-        task_create_kstack_user(ntask, false);
-        ntask->start_routine = task_routine;
-
-    } else {
-        uptr klimit = vmalloc(null, null, TASK_STACK_SIZE_32KB, VMM_FLAGS_DEFAULT);
-        uptr kstack = ((uptr)klimit + TASK_STACK_SIZE_32KB);
-
-        kstack -= sizeof(first_frame_t);
-        first_frame_t *first_frame = (first_frame_t *)kstack;
-
-        kstack -= sizeof(task_gr_t);
-        task_gr_t *task_gr = (task_gr_t *)kstack;
-
-        ntask->kstack = kstack;
-        ntask->klimit = klimit;
-        ntask->kstack_ptr = klimit;
-
-        ntask->ustack = null;
-        ntask->ulimit = null;
-        ntask->ustack_ptr = null;
-
-        ntask->tstack = kstack;
-        ntask->tlimit = klimit;
-
-        ntask->start_routine = task_routine;
-        ntask->system_routine = __sched_task_start;
-
-
-        first_frame->func = ntask->system_routine;
-        first_frame->func0 = ntask->start_routine;
-        first_frame->param0 = 0;
-
-        ntask->frist_frame = first_frame;
-        ntask->task_gr = task_gr;
-    }
-
-    /*
-     * TODO kernel task有两条运行路径
-     * 1. 创建后直接切换
-     * 2. 中断进入后通过修改trapframe切换
-     */
-    
-
-    return ntask;
+    return id;
 }
 
-void task_create_kstack_user(task_t *ntask, bool replace) {
+static void _task_setup_kstack(task_t *t) {
     uptr klimit = vmalloc(null, null, TASK_STACK_SIZE_32KB, VMM_FLAGS_DEFAULT);
-    uptr kstack = ((uptr)klimit + TASK_STACK_SIZE_32KB);
-
-    // ustack
-    // uptr ulimit = vmalloc(ntask->mm, null, TASK_STACK_SIZE_32KB, VMM_FLAGS_USER);
-    // uptr ustack = ((uptr)ulimit + TASK_STACK_SIZE_32KB);
-
-    // kernel enter
-    kstack -= sizeof(trapframe_t);
-    trapframe_t *trapf = (trapframe_t *)kstack;
-    memset(trapf, 0, sizeof(trapframe_t));
+    uptr kstack = klimit + TASK_STACK_SIZE_32KB;
 
     kstack -= sizeof(first_frame_t);
-    first_frame_t *first_frame = (first_frame_t *)kstack;
-    memset(first_frame, 0, sizeof(first_frame_t));
+    first_frame_t *ff = (first_frame_t *)kstack;
 
     kstack -= sizeof(task_gr_t);
-    task_gr_t *task_gr = (task_gr_t *)kstack;
-    memset(task_gr, 0, sizeof(task_gr_t));
+    task_gr_t *gr = (task_gr_t *)kstack;
 
-    // user enter
-    // ustack -= sizeof(first_frame_t);
-    // first_frame_t *first_frame_user = (first_frame_t *)ustack;
+    t->kstack      = (void *)kstack;
+    t->klimit       = (void *)klimit;
+    t->kstack_ptr   = (void *)klimit;
+    t->tstack       = (void *)kstack;
+    t->tlimit       = (void *)klimit;
+    t->task_gr      = gr;
+    t->frist_frame  = ff;
 
+    ff->func   = t->system_routine;
+    ff->func0  = (uptr)t->start_routine;
+    ff->param0 = 0;
+}
+
+static void _task_setup_kstack_user(task_t *t, bool replace) {
+    uptr klimit = vmalloc(null, null, TASK_STACK_SIZE_32KB, VMM_FLAGS_DEFAULT);
+    uptr kstack = klimit + TASK_STACK_SIZE_32KB;
+
+    kstack -= sizeof(trapframe_t);
+    trapframe_t *tf = (trapframe_t *)kstack;
+    memset(tf, 0, sizeof(trapframe_t));
+
+    kstack -= sizeof(first_frame_t);
+    first_frame_t *ff = (first_frame_t *)kstack;
+    memset(ff, 0, sizeof(first_frame_t));
+
+    kstack -= sizeof(task_gr_t);
+    task_gr_t *gr = (task_gr_t *)kstack;
+    memset(gr, 0, sizeof(task_gr_t));
 
     if (replace) {
-        ntask->rstack = kstack;
-        ntask->rlimit = klimit;
-        ntask->rstack_ptr = klimit;
+        t->rstack      = (void *)kstack;
+        t->rlimit       = (void *)klimit;
+        t->rstack_ptr   = (void *)klimit;
     } else {
-        ntask->kstack = kstack;
-        ntask->klimit = klimit;
-        ntask->kstack_ptr = klimit;
+        t->kstack      = (void *)kstack;
+        t->klimit       = (void *)klimit;
+        t->kstack_ptr   = (void *)klimit;
     }
+    t->tstack          = (void *)kstack;
+    t->tlimit          = (void *)klimit;
+    t->task_gr         = gr;
+    t->frist_frame     = ff;
+    t->trap_frame      = tf;
 
-    ntask->tstack = kstack;
-    ntask->tlimit = klimit;
+    ff->func   = t->system_routine;
+    ff->func0  = 0;
+    ff->param0 = 0;
 
-    // ntask->ustack = ustack;
-    // ntask->ulimit = ulimit;
-    // ntask->ustack_ptr = ulimit;
-
-    
-    ntask->start_routine = 0;
-    ntask->system_routine = __sched_task_start_user;
-
-    // kernel steup
-    first_frame->func = ntask->system_routine;
-    first_frame->func0 = 0;
-    first_frame->param0 = 0;
-
-    ntask->frist_frame = first_frame;
-    ntask->task_gr = task_gr;
-
-    // user setup
-    trapf->ss = USER_DATA_SELECTOR;
-    // trapf->rsp = ustack;
-    trapf->rflags = 0x202;
-    trapf->cs = USER_CODE_SELECTOR;
-    // trapf->rip = ntask->start_routine;
-
-    // ntask->frist_frame_user = first_frame_user;
-    ntask->trap_frame = trapf;
+    tf->ss     = USER_DATA_SELECTOR;
+    tf->rflags = 0x202;
+    tf->cs     = USER_CODE_SELECTOR;
 }
 
-//TODO:  free on wait zombie
-void task_free(task_t *task) {
-    kfree(task->kstack_ptr);
-    mm_free(task->mm);
-    kfree(task);
-}
 
-void task_free_phase0(task_t *task) {
-    if (task->mode == TASK_USER_MODE) {
-        vfree(task->mm, task->ustack_ptr);
+task_t *task_create(const char *name, task_routine_t routine,
+                    task_priority_t priority, task_mode_t mode) {
+    task_t *t = kzalloc(sizeof(task_t));
 
-        if (task->u_argv)
-            kfree(task->u_argv);
+    t->tgid = t->tid = _alloc_tid();
+    t->priority = priority;
+    t->mode     = mode;
+    t->state    = TASK_READY;
 
+    strncpy(t->name, name, TASK_MAX_NAME_LEN - 1);
+    t->name[TASK_MAX_NAME_LEN - 1] = '\0';
+
+    t->mm = mm_create();
+    dlist_init(&t->open_files);
+
+    t->wakeup_event = (kevent_t *)kzalloc(sizeof(kevent_t));
+
+    if (mode == TASK_USER_MODE) {
+        t->start_routine  = routine;
+        t->system_routine = __sched_task_start_user;
+        _task_setup_kstack_user(t, false);
+    } else {
+        t->start_routine  = routine;
+        t->system_routine = __sched_task_start;
+        _task_setup_kstack(t);
     }
 
-    // free open files
-    while (!dlist_is_empty(&task->open_files)) {
-        linked_list_t *next = null;
-        dlist_get_next(&task->open_files, &next);
+    return t;
+}
 
-        if (next) {
-            vfs_file_t *vfsfile = dlist_container_of(next, vfs_file_t, open_list_entry);
-            if (vfsfile->is_console) {
-                vfs_close_console(vfsfile->f_handle);
-            } else {
-                vfs_close(vfsfile->f_handle);
-            }
-        }
-        next = null;
+
+static void _task_close_all_files(task_t *t) {
+    while (!dlist_is_empty(&t->open_files)) {
+        linked_list_t *entry = t->open_files.next;
+        dlist_remove_entry(entry);
+
+        vfs_file_t *f = dlist_container_of(entry, vfs_file_t, open_list_entry);
+        if (f->is_console)
+            vfs_close_console(f->f_handle);
+        else
+            vfs_close(f->f_handle);
+    }
+}
+
+void task_free(task_t *t) {
+    task_free_phase0(t);
+    if (t->kstack_ptr)
+        kfree(t->kstack_ptr);
+    mm_free(t->mm);
+    kfree(t);
+}
+
+void task_free_phase0(task_t *t) {
+    if (t->mode == TASK_USER_MODE && t->ustack_ptr)
+        vfree(t->mm, t->ustack_ptr);
+
+    if (t->u_argv) {
+        kfree(t->u_argv);
+        t->u_argv = null;
     }
 
-    kfree(task->wakeup_event);
+    _task_close_all_files(t);
+
+    if (t->wakeup_event) {
+        kfree(t->wakeup_event);
+        t->wakeup_event = null;
+    }
 }
+
 
 void task_setup_ustack(task_t *t, void *ustack, u32 size) {
     t->ustack_ptr = ustack;
-    t->ustack = (void *)((u8 *)ustack + size);
-    t->ulimit = ustack;
-    t->trap_frame->rsp = t->ustack;
+    t->ustack     = (void *)((u8 *)ustack + size);
+    t->ulimit     = ustack;
+    t->trap_frame->rsp = (uptr)t->ustack;
 }
 
-void task_setup_routine(task_t *t, task_routine_t task_routine) {
-    t->start_routine = task_routine;
-    t->trap_frame->rip = task_routine;
+void task_setup_routine(task_t *t, task_routine_t routine) {
+    t->start_routine = routine;
+    t->trap_frame->rip = (uptr)routine;
 }
 
 void task_setup_path(task_t *t, const char *path) {
-    memcpy(t->execve_path, path, strlen(path));
+    size_t len = strlen(path);
+    if (len >= VFS_MAX_PATH_LENGTH) len = VFS_MAX_PATH_LENGTH - 1;
+    memcpy(t->execve_path, path, len);
+    t->execve_path[len] = '\0';
 }
 
 void task_setup_argv(task_t *t, int argc, char **argv) {
-    if (!argc) {
-        return;
-    }
-
+    if (argc <= 0) return;
     t->u_argc = argc;
     t->u_argv = (char *)kzalloc(argc * TASK_MAX_ARGV_LEN);
     for (int i = 0; i < argc; i++) {
-        char *arg = task_argv(t, 0);    
-        memcpy(arg, argv[i], strlen(argv[i]));
+        char *dst = task_argv(t, i);
+        size_t len = strlen(argv[i]);
+        if (len >= TASK_MAX_ARGV_LEN) len = TASK_MAX_ARGV_LEN - 1;
+        memcpy(dst, argv[i], len);
+        dst[len] = '\0';
     }
 }
 
 void task_setup_cwd(task_t *t, char *cwd) {
-    memcpy(t->cwd, cwd, strlen(cwd));
+    size_t len = strlen(cwd);
+    if (len >= VFS_MAX_PATH_LENGTH) len = VFS_MAX_PATH_LENGTH - 1;
+    memcpy(t->cwd, cwd, len);
+    t->cwd[len] = '\0';
 }
+
 
 task_t *task_fork(task_t *p) {
     u64 flags;
-
     spin_lock_irq(&task_lock, flags);
 
-    if (p->mode == TASK_KERNEL_MODE) {
-        spin_unlock_irq(&task_lock, flags);
+    if (p->mode == TASK_KERNEL_MODE)
         panic("cannot fork kernel task");
+
+    task_t *c = kzalloc(sizeof(task_t));
+    memcpy(c, p, sizeof(task_t));
+
+    c->tgid = c->tid = _alloc_tid();
+    c->mm = mm_copy(p->mm);
+
+    dlist_init(&c->open_files);
+
+    if (p->u_argc > 0 && p->u_argv) {
+        c->u_argc = p->u_argc;
+        c->u_argv = (char *)kzalloc(p->u_argc * TASK_MAX_ARGV_LEN);
+        memcpy(c->u_argv, p->u_argv, p->u_argc * TASK_MAX_ARGV_LEN);
     }
 
-    task_t *ntask = kzalloc(sizeof(task_t));
-    memcpy(ntask, p, sizeof(task_t));
+    c->state = TASK_READY;
+    c->wakeup_event = (kevent_t *)kzalloc(sizeof(kevent_t));
+    c->is_fork = true;
 
-    spin_lock(&global_id_lock);
-    ntask->tid = ++global_id;
-    spin_unlock(&global_id_lock);
-
-    // mm copy
-    ntask->mm = mm_copy(p->mm);
-
-    dlist_init(&ntask->open_files);
-    
-    // copy args
-    ntask->u_argc = p->u_argc;
-    ntask->u_argv = (char *)kzalloc(p->u_argc * TASK_MAX_ARGV_LEN);
-    memcpy(ntask->u_argv, p->u_argv, p->u_argc * TASK_MAX_ARGV_LEN);
-
-
-    ntask->state = TASK_READY;
-    ntask->wakeup_event = (kevent_t *)kzalloc(sizeof(kevent_t));
-
-    task_create_kstack_user(ntask, false);
-
-    //
-    ntask->is_fork = true;
+    _task_setup_kstack_user(c, false);
 
     spin_unlock_irq(&task_lock, flags);
-
-    return ntask;
+    return c;
 }
 
-task_t *task_replace(task_t *ntask, const char *name) {
+
+task_t *task_replace(task_t *t, const char *name) {
     u64 flags;
-
     spin_lock_irq(&task_lock, flags);
-    
-    if (ntask->mode == TASK_KERNEL_MODE) {
-        spin_unlock_irq(&task_lock, flags);
+
+    if (t->mode == TASK_KERNEL_MODE)
         panic("cannot replace kernel task");
+
+    if (t->wakeup_event) {
+        kfree(t->wakeup_event);
+        t->wakeup_event = null;
     }
 
-    kfree(ntask->wakeup_event);
-    ntask->wakeup_event = (kevent_t *)kzalloc(sizeof(kevent_t));
-
-    //memset(ntask->kstack_ptr, 0, TASK_STACK_SIZE_32KB);
-    // ntask->tstack = ntask->kstack;
-    // ntask->tlimit = ntask->klimit;
-
-    ntask->mm = mm_replace(ntask->mm);
-    // ntask->rmm = mm_create();
-
-    ntask->state = TASK_READY;
-
-    strncpy(&ntask->name[0], name, TASK_MAX_NAME_LEN);
-
-    ntask->wakeup_event = (kevent_t *)kzalloc(sizeof(kevent_t));
-
-    // TODO fs_struct
-    while (!dlist_is_empty(&ntask->open_files)) {
-        linked_list_t *next = null;
-        dlist_get_next(&ntask->open_files, &next);
-
-        if (next) {
-            vfs_file_t *vfsfile = dlist_container_of(next, vfs_file_t, open_list_entry);
-            if (vfsfile->is_console) {
-                vfs_close_console(vfsfile->f_handle);
-            } else {
-                vfs_close(vfsfile->f_handle);
-            }
-        }
-        next = null;
+    if (t->u_argv) {
+        kfree(t->u_argv);
+        t->u_argv = null;
     }
 
-    task_create_kstack_user(ntask, true);
+    t->mm = mm_replace(t->mm);
+    t->state = TASK_READY;
 
-    //
-    ntask->is_fork = false;
+    strncpy(t->name, name, TASK_MAX_NAME_LEN - 1);
+    t->name[TASK_MAX_NAME_LEN - 1] = '\0';
 
+    t->wakeup_event = (kevent_t *)kzalloc(sizeof(kevent_t));
+
+    _task_close_all_files(t);
+    _task_setup_kstack_user(t, true);
+
+    t->is_fork = false;
     spin_unlock_irq(&task_lock, flags);
+    return t;
 }
+
 
 void task_init_ustack(task_t *t) {
-    void *argv;
-    uptr *argv_ptr;
+    int argc = t->u_argc + 1;
+    u8 *sp = (u8 *)t->ustack;
 
-    uptr *argvp;
-    uptr *argcp;
+    sp -= argc * TASK_MAX_ARGV_LEN;
+    u8 *argv_area = sp;
 
-    int argc = t->u_argc+1;
-    u8 *ustack = t->ustack;
+    sp -= argc * sizeof(uptr);
+    uptr *argv_ptr = (uptr *)sp;
 
+    sp -= sizeof(uptr);
+    uptr *argvp = (uptr *)sp;
 
-    ustack -= (argc * TASK_MAX_ARGV_LEN);
-    argv = ustack;
+    sp -= sizeof(uptr);
+    uptr *argcp = (uptr *)sp;
 
-    ustack -= (argc * sizeof(void*));
-    argv_ptr = ustack;
+    memcpy(argv_area, t->execve_path, TASK_MAX_ARGV_LEN);
+    argv_ptr[0] = (uptr)argv_area;
 
-    ustack -= (sizeof(uptr));
-    argvp = ustack;
-
-    ustack -= (sizeof(uptr));
-    argcp = ustack;
-
-    // index 0 is path
-    memcpy((u8*)argv, t->execve_path, TASK_MAX_ARGV_LEN);
-    argv_ptr[0] = (u8*)argv;
-
-    for (int i = 1; i < argc-1; i++) {
-        memcpy((u8*)argv + i * TASK_MAX_ARGV_LEN, t->u_argv[i*TASK_MAX_ARGV_LEN], TASK_MAX_ARGV_LEN);
-        argv_ptr[i] = (u8*)argv + i * TASK_MAX_ARGV_LEN;
+    for (int i = 1; i < argc; i++) {
+        char *src = task_argv(t, i);
+        u8 *dst = argv_area + i * TASK_MAX_ARGV_LEN;
+        memcpy(dst, src, TASK_MAX_ARGV_LEN);
+        argv_ptr[i] = (uptr)dst;
     }
 
-    *argvp = argv_ptr;
-    *argcp = argc;
+    *argvp = (uptr)argv_ptr;
+    *argcp = (uptr)argc;
 
-    t->ustack = ustack;
-    t->trap_frame->rsp = t->ustack;
+    t->ustack = sp;
+    t->trap_frame->rsp = (uptr)sp;
 }
