@@ -54,7 +54,7 @@ vfs_super_block_t *ttyfs_mksb(vfs_fs_t *fs) {
     vfs_dentry_t *dentry = kzalloc(sizeof(vfs_dentry_t));
     dentry->d_ops = &ttyfs_dentry_ops;
     dentry->d_parent = dentry;
-    dentry->d_name[0] = '/';
+    dentry->d_name[0] = '\0';
     dlist_init(&dentry->d_subdirs);
     //
     sb->s_root = dentry;

@@ -154,7 +154,6 @@ typedef struct _vfs_fs_t {
 void vfs_init();
 
 void vfs_register_fs(vfs_fs_t *);
-vfs_fs_t *vfs_get_fs(char *name);
 
 i32 vfs_mount_fs(const char *path, const char *fs_name);
 

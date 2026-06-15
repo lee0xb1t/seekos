@@ -170,19 +170,22 @@ void sys_getcwd(char *buf, size_t len) {
 }
 
 i32 sys_chdir(char *path) {
-    i32 r = 0;
+    i32 r = -1;
+    vfs_handle_t fh = vfs_open(path, VFS_MODE_READ);
+    if (fh == VFS_INVALID_HANDLE)
+        return -1;
+
     char full_path[VFS_MAX_PATH_LENGTH] = {0};
-    vfs_handle_t fh = vfs_open(path, VFS_MODE_READWRITE);
     r = vfs_get_full_path(fh, VFS_MAX_PATH_LENGTH, full_path);
-    if (r == -1) {
+    if (r) {
         vfs_close(fh);
-        return r;
+        return -1;
     }
     task_t *t = sched_get_task();
     memset(t->cwd, 0, VFS_MAX_PATH_LENGTH);
     memcpy(t->cwd, full_path, strlen(full_path));
     vfs_close(fh);
-    return r;
+    return 0;
 }
 
 u32 sys_spawn(const char *path, int argc, char **argv) {

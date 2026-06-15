@@ -20,6 +20,13 @@ extern vfs_fs_t ramfs;
 extern vfs_fs_t ttyfs;
 
 
+///
+
+vfs_fs_t *vfs_get_fs(char *name);
+
+
+///
+
 void vfs_init() {
     dlist_init(&vfs_fs_list);
 
@@ -39,14 +46,16 @@ void vfs_init() {
 }
 
 void vfs_register_fs(vfs_fs_t *fs) {
+    spin_lock(&vfs_lock);
     dlist_add_prev(&vfs_fs_list, &fs->list_entry);
+    spin_unlock(&vfs_lock);
 }
 
 vfs_fs_t *vfs_get_fs(char *name) {
     dlist_foreach(&vfs_fs_list, entry) {
         vfs_fs_t *fs = dlist_container_of(entry, vfs_fs_t, list_entry);
 
-        if (strcmp(name, fs->fs_name)) {
+        if (strcmp(name, fs->fs_name) == 0) {
             return fs;
         }
     }
@@ -108,13 +117,12 @@ vfs_dentry_t *vfs_resolve_path(const char *path, u8 mode) {
 
     char tmppath[VFS_MAX_PATH_LENGTH] = { 0 };
     char nextpath[VFS_MAX_PATH_LENGTH] = { 0 };
-    size_t nextpathlen = 0;
-
-    vfs_dentry_t *parent = vfs_root->s_root;
 
     if (!vfs_root) {
         goto _end;
     }
+
+    vfs_dentry_t *parent = vfs_root->s_root;
 
     if (path[0] == '/' && strlen(path) == 1) {
         return parent;
@@ -122,14 +130,10 @@ vfs_dentry_t *vfs_resolve_path(const char *path, u8 mode) {
 
     if (path[0] != '/') {
         char *cwd = sched_get_task()->cwd;
-
-        if (strcmp(cwd, "/")) {
-            whole_path[0] = '/';
-            whole_path[1] = '\0';
-        }
-
         memcpy(whole_path, cwd, strlen(cwd));
-        memcpy(whole_path + strlen(whole_path), "/", 1);
+        if (strcmp(cwd, "/") != 0) {
+            memcpy(whole_path + strlen(whole_path), "/", 1);
+        }
         memcpy(whole_path + strlen(whole_path), path, strlen(path));
     } else {
         memcpy(whole_path, path, strlen(path));
@@ -146,11 +150,13 @@ vfs_dentry_t *vfs_resolve_path(const char *path, u8 mode) {
             break;
         }
 
-        if (strcmp(nextpath, ".")) {
+        if (strcmp(nextpath, ".") == 0) {
             continue;
-        } else if (strcmp(nextpath, "..")) {
-            current = current->d_parent;
-            parent = current;
+        } else if (strcmp(nextpath, "..") == 0) {
+            if (current) {
+                current = current->d_parent;
+                parent = current;
+            }
             continue;
         }
 
@@ -158,7 +164,7 @@ vfs_dentry_t *vfs_resolve_path(const char *path, u8 mode) {
 
         dlist_foreach(&parent->d_subdirs, entry) {
             current = dlist_container_of(entry, vfs_dentry_t, d_list_entry);
-            if (strcmp(current->d_name, nextpath)) {
+            if (strcmp(current->d_name, nextpath) == 0) {
                 break;
             }
             current = null;
@@ -195,10 +201,9 @@ _end:
 
 
 i32 vfs_mount_fs(const char *path, const char *fs_name) {
-    u64 flags;
     size_t pathlen = strlen(path);
 
-    spin_lock_irq(&vfs_lock, flags);
+    spin_lock(&vfs_lock);
 
     vfs_fs_t *fs = vfs_get_fs(fs_name);
 
@@ -208,37 +213,39 @@ i32 vfs_mount_fs(const char *path, const char *fs_name) {
 
     if (path[0] == '/' && pathlen == 1) {
         vfs_root = fs->mksb(fs);
-        spin_unlock_irq(&vfs_lock, flags);
+        spin_unlock(&vfs_lock);
         return 0;
     }
 
     vfs_dentry_t *dentry = vfs_resolve_path(path, R_NO_CREATE);
     
     if (dentry == null) {
+        spin_unlock(&vfs_lock);
         return -1;
     }
 
-    dentry->d_inode->i_mountpoint = fs->mksb(fs);
+    vfs_super_block_t *sb = fs->mksb(fs);
+    dentry->d_inode->i_mountpoint = sb;
+    sb->s_root->d_parent = dentry;
 
-    spin_unlock_irq(&vfs_lock, flags);
+    spin_unlock(&vfs_lock);
     
     return 0;
 }
 
 
 vfs_handle_t vfs_open(char *path, vfs_openmode_t openmode) {
-    u64 flags;
     
-    spin_lock_irq(&vfs_lock, flags);
+    spin_lock(&vfs_lock);
 
     vfs_dentry_t *dentry = vfs_resolve_path(path, R_NO_CREATE);
     if (dentry == null) {
-        spin_unlock_irq(&vfs_lock, flags);
+        spin_unlock(&vfs_lock);
         return VFS_INVALID_HANDLE;
     }
 
     if (!dentry->d_inode) {
-        spin_unlock_irq(&vfs_lock, flags);
+        spin_unlock(&vfs_lock);
         panic("[VFS] dentry not found inode");
     }
 
@@ -253,6 +260,7 @@ vfs_handle_t vfs_open(char *path, vfs_openmode_t openmode) {
     fd->f_handle = fh;
     fd->f_openmode = openmode;
     fd->f_dentry = dentry;
+    fd->count = 1;
 
     fd->f_inode = dentry->d_inode;
     fd->f_ops = dentry->d_inode->i_fops;
@@ -262,15 +270,14 @@ vfs_handle_t vfs_open(char *path, vfs_openmode_t openmode) {
     task_t *t = sched_get_task();
     dlist_add_prev(&t->open_files, &fd->open_list_entry);
 
-    spin_unlock_irq(&vfs_lock, flags);
+    spin_unlock(&vfs_lock);
 
     return fh;
 }
 
 i32 vfs_close(vfs_handle_t fh) {
-    u64 flags;
     i32 r = -1;
-    spin_lock_irq(&vfs_lock, flags);
+    spin_lock(&vfs_lock);
 
     vfs_file_t *fd = null;
 
@@ -283,30 +290,33 @@ i32 vfs_close(vfs_handle_t fh) {
         fd = null;
     }
 
-    fd->count--;
-    if (fd->count >= 0) {
-        spin_unlock_irq(&vfs_lock, flags);
+    if (!fd) {
+        spin_unlock(&vfs_lock);
+        return -1;
+    }
+
+    if (--fd->count > 0) {
+        spin_unlock(&vfs_lock);
         return 0;
     }
 
-    if (fd && fd->f_ops) {
-        spin_unlock_irq(&vfs_lock, flags);
+    if (fd->f_ops) {
+        spin_unlock(&vfs_lock);
         r = fd->f_ops->close(fd->f_inode, fd);
-        spin_lock_irq(&vfs_lock, flags);
+        spin_lock(&vfs_lock);
     }
 
     dlist_remove_entry(&fd->open_list_entry);
     kfree(fd);
 
-    spin_unlock_irq(&vfs_lock, flags);
+    spin_unlock(&vfs_lock);
     return r;
 }
 
 i32 vfs_read(vfs_handle_t fh, i32 len, char* buff) {
-    u64 flags;
     i32 r = 0;
 
-    spin_lock_irq(&vfs_lock, flags);
+    spin_lock(&vfs_lock);
 
     vfs_file_t *fd = null;
 
@@ -321,20 +331,19 @@ i32 vfs_read(vfs_handle_t fh, i32 len, char* buff) {
 
     if (fd && fd->f_ops) {
         //r = fd->f_ops->read(fd->f_inode, fd, len, buff);
-        spin_unlock_irq(&vfs_lock, flags);
+        spin_unlock(&vfs_lock);
         r = fd->f_ops->read(fd->f_inode, fd, len, buff);
-        spin_lock_irq(&vfs_lock, flags);
+        spin_lock(&vfs_lock);
     }
 
-    spin_unlock_irq(&vfs_lock, flags);
+    spin_unlock(&vfs_lock);
     return r;
 }
 
 i32 vfs_write(vfs_handle_t fh, i32 len, const char* buff) {
-    u64 flags;
     i32 r = 0;
 
-    spin_lock_irq(&vfs_lock, flags);
+    spin_lock(&vfs_lock);
 
     vfs_file_t *fd = null;
 
@@ -349,20 +358,19 @@ i32 vfs_write(vfs_handle_t fh, i32 len, const char* buff) {
 
     if (fd && fd->f_ops) {
         // r = fd->f_ops->write(fd->f_inode, fd, len, buff);
-        spin_unlock_irq(&vfs_lock, flags);
+        spin_unlock(&vfs_lock);
         r = fd->f_ops->write(fd->f_inode, fd, len, buff);
-        spin_lock_irq(&vfs_lock, flags);
+        spin_lock(&vfs_lock);
     }
 
-    spin_unlock_irq(&vfs_lock, flags);
+    spin_unlock(&vfs_lock);
     return r;
 }
 
 i32 vfs_lseek(vfs_handle_t fh, i32 offset , i32 wence) {
-    u64 flags;
     i32 r = 0;
 
-    spin_lock_irq(&vfs_lock, flags);
+    spin_lock(&vfs_lock);
 
     vfs_file_t *fd = null;
 
@@ -377,20 +385,19 @@ i32 vfs_lseek(vfs_handle_t fh, i32 offset , i32 wence) {
 
     if (fd && fd->f_ops) {
         //r = fd->f_ops->lseek(fd->f_inode, fd, offset, wence);
-        spin_unlock_irq(&vfs_lock, flags);
+        spin_unlock(&vfs_lock);
         r = fd->f_ops->lseek(fd->f_inode, fd, offset, wence);
-        spin_lock_irq(&vfs_lock, flags);
+        spin_lock(&vfs_lock);
     }
 
-    spin_unlock_irq(&vfs_lock, flags);
+    spin_unlock(&vfs_lock);
     return r;
 }
 
 i32 vfs_get_full_path(vfs_handle_t fh, i32 len, char *buff) {
-    u64 flags;
     i32 r = 0;
 
-    spin_lock_irq(&vfs_lock, flags);
+    spin_lock(&vfs_lock);
 
     vfs_file_t *fd = null;
 
@@ -403,12 +410,13 @@ i32 vfs_get_full_path(vfs_handle_t fh, i32 len, char *buff) {
         fd = null;
     }
 
-    // if (fd && fd->f_ops) {
-    //     r = fd->f_ops->lseek(fd->f_inode, fd, offset, wence);
-    // }
+    if (!fd) {
+        spin_unlock(&vfs_lock);
+        return -1;
+    }
 
-    char full_path[VFS_MAX_FS_NAME] = {0};
-    char temp_path[VFS_MAX_FS_NAME] = {0};
+    char full_path[VFS_MAX_PATH_LENGTH] = {0};
+    char temp_path[VFS_MAX_PATH_LENGTH] = {0};
     vfs_dentry_t *dentry = fd->f_dentry;
 
     if (dentry == vfs_root->s_root) {
@@ -421,24 +429,33 @@ i32 vfs_get_full_path(vfs_handle_t fh, i32 len, char *buff) {
         memcpy(temp_path+strlen(dentry->d_name), full_path, strlen(full_path));
         memcpy(temp_path, dentry->d_name, strlen(dentry->d_name));
         memcpy(full_path, temp_path, strlen(temp_path));
-        dentry = dentry->d_parent;
+        vfs_dentry_t *parent = dentry->d_parent;
+        if (parent == dentry || parent == null)
+            break;
+        dentry = parent;
 
         memcpy(temp_path+1, full_path, strlen(full_path));
         memcpy(temp_path, "/", 1);
         memcpy(full_path, temp_path, strlen(temp_path));
     }
 
-    memcpy(buff, full_path, min(strlen(full_path), len));
+    size_t full_len = strlen(full_path);
+    if (full_len > 1 && full_path[full_len - 1] == '/') {
+        full_path[full_len - 1] = '\0';
+    }
 
-    spin_unlock_irq(&vfs_lock, flags);
+    i32 copy_len = min(strlen(full_path), len - 1);
+    memcpy(buff, full_path, copy_len);
+    buff[copy_len] = '\0';
+
+    spin_unlock(&vfs_lock);
     return r;
 }
 
 i32 vfs_iterate(vfs_handle_t fh, i32 *filecnt, vfs_dirent_t **dirent) {
-    u64 flags;
     i32 r = -1;
 
-    spin_lock_irq(&vfs_lock, flags);
+    spin_lock(&vfs_lock);
 
     vfs_file_t *fd = null;
 
@@ -453,23 +470,22 @@ i32 vfs_iterate(vfs_handle_t fh, i32 *filecnt, vfs_dirent_t **dirent) {
 
     if (fd && fd->f_ops) {
         //r = fd->f_ops->iterate(fd->f_inode, fd, null, filecnt, dirent);
-        spin_unlock_irq(&vfs_lock, flags);
+        spin_unlock(&vfs_lock);
         r = fd->f_ops->iterate(fd->f_inode, fd, null, filecnt, dirent);
-        spin_lock_irq(&vfs_lock, flags);
+        spin_lock(&vfs_lock);
     }
 
-    spin_unlock_irq(&vfs_lock, flags);
+    spin_unlock(&vfs_lock);
     return r;
 }
 
 vfs_handle_t vfs_open_console(char *path, vfs_handle_t fh) {
-    u64 flags;
 
-    spin_lock_irq(&vfs_lock, flags);
+    spin_lock(&vfs_lock);
 
     vfs_dentry_t *dentry = vfs_resolve_path(path, R_NO_CREATE);
     if (dentry == null) {
-        spin_unlock_irq(&vfs_lock, flags);
+        spin_unlock(&vfs_lock);
         return VFS_INVALID_HANDLE;
     }
 
@@ -488,6 +504,7 @@ vfs_handle_t vfs_open_console(char *path, vfs_handle_t fh) {
     fd->f_handle = fh;
     fd->f_openmode = VFS_MODE_READWRITE;
     fd->f_dentry = dentry;
+    fd->count = 1;
 
     fd->f_inode = dentry->d_inode;
     fd->f_ops = dentry->d_inode->i_fops;
@@ -497,16 +514,15 @@ vfs_handle_t vfs_open_console(char *path, vfs_handle_t fh) {
     task_t *t = sched_get_task();
     dlist_add_prev(&t->open_files, &fd->open_list_entry);
 
-    spin_unlock_irq(&vfs_lock, flags);
+    spin_unlock(&vfs_lock);
 
     return fh;
 }
 
 vfs_handle_t vfs_close_console(vfs_handle_t fh) {
-    u64 flags;
     i32 r = -1;
 
-    spin_lock_irq(&vfs_lock, flags);
+    spin_lock(&vfs_lock);
 
     vfs_file_t *fd = null;
 
@@ -519,34 +535,39 @@ vfs_handle_t vfs_close_console(vfs_handle_t fh) {
         fd = null;
     }
 
-    if (fd && fd->f_ops) {
+    if (!fd) {
+        spin_unlock(&vfs_lock);
+        return -1;
+    }
+
+    if (fd->f_ops) {
         r = fd->f_ops->close(fd->f_inode, fd);
     }
 
     dlist_remove_entry(&fd->open_list_entry);
     kfree(fd);
 
-    spin_unlock_irq(&vfs_lock, flags);
+    spin_unlock(&vfs_lock);
     return r;
 }
 
 void vfs_copy(linked_list_t *p) {
-    u64 flags;
 
-    spin_lock_irq(&vfs_lock, flags);
+    spin_lock(&vfs_lock);
 
-    // TODO vfs_struct
     task_t *t = sched_get_task();
 
     dlist_foreach(p, entry) {
         vfs_file_t *filep = dlist_container_of(entry, vfs_file_t, open_list_entry);
         if (!filep->is_console) {
-            filep->count++; //TODO
+            filep->count++;
             vfs_file_t *nf = (vfs_file_t *)kzalloc(sizeof(vfs_file_t));
-            memcpy(nf, filep, sizeof(vfs_file_t));
+            *nf = *filep;
+            dlist_init(&nf->open_list_entry);
+            nf->f_pdata = null;
             dlist_add_prev(&t->open_files, &nf->open_list_entry);
         }
     }
 
-    spin_unlock_irq(&vfs_lock, flags);
+    spin_unlock(&vfs_lock);
 }

@@ -152,7 +152,7 @@ void _prepare_kernel_init(struct limine_memmap_response *mm, struct limine_execu
             }
         } else {
             if (mm->entries[i]->type == LIMINE_MEMMAP_BOOTLOADER_RECLAIMABLE
-                || mm->entries[i]->type == LIMINE_MEMMAP_ACPI_TABLES) {
+                || mm->entries[i]->type == LIMINE_MEMMAP_RESERVED_MAPPED) {
 
                 for (uptr offset = 0; offset < mm->entries[i]->length; offset += PAGE_SIZE) {
                     uptr pa = mm->entries[i]->base + offset;

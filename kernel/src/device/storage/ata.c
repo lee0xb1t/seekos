@@ -163,9 +163,13 @@ void ata_poll(ata_device_t *dev, bool datardy) {
 }
 
 void ata_pio_read28(ata_device_t *dev, u8 sector_count, u32 lba, u8 *buff) {
+    u64 flags;
+
     if (dev == null) {
         dev = current_drive;
     }
+
+    spin_lock_irq(&ata_lock, flags);
 
     ata_delay_400ns(dev);
 
@@ -192,12 +196,18 @@ void ata_pio_read28(ata_device_t *dev, u8 sector_count, u32 lba, u8 *buff) {
     }
 
     ata_poll(dev, false);
+
+    spin_unlock_irq(&ata_lock, flags);
 }
 
 void ata_pio_write28(ata_device_t *dev, u8 sector_count, u32 lba, u8 *buff) {
+    u64 flags;
+
     if (!dev) {
         dev = current_drive;
     }
+
+    spin_lock_irq(&ata_lock, flags);
 
     ata_delay_400ns(dev);
 
@@ -229,4 +239,6 @@ void ata_pio_write28(ata_device_t *dev, u8 sector_count, u32 lba, u8 *buff) {
     ata_poll(dev, false);
     port_outb(dev->io + ATA_REG_COMMAND, ATA_CMD_CACHE_FLUSH);
     ata_poll(dev, false);
+
+    spin_unlock_irq(&ata_lock, flags);
 }

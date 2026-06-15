@@ -3,119 +3,162 @@
 #include <lib/ktypes.h>
 #include <fs/vfs.h>
 
+//------------------------------------------------------------------------------
+enum
+{
+  FAT_ERR_NONE     =  0,
+  FAT_ERR_NOFAT    = -1,
+  FAT_ERR_BROKEN   = -2,
+  FAT_ERR_IO     = -3,
+  FAT_ERR_PARAM    = -4,
+  FAT_ERR_PATH     = -5,
+  FAT_ERR_EOF      = -6,
+  FAT_ERR_DENIED   = -7,
+  FAT_ERR_FULL     = -8,
+};
 
-typedef struct _mbr_partition_t {
-    u8 status;                  // 0x80=活动, 0x00=非活动
-    u8 chs_start[3];            // 起始CHS地址
-    u8 type;                    // 分区类型 (0x0B/0x0C=FAT32)
-    u8 chs_end[3];              // 结束CHS地址
-    u32 lba_start;              // 分区起始LBA
-    u32 sector_count;           // 分区扇区数
-} __attribute__((packed)) mbr_partition_t;
+enum
+{
+  FAT_ATTR_NONE     = 0x00,
+  FAT_ATTR_RO       = 0x01,
+  FAT_ATTR_HIDDEN   = 0x02,
+  FAT_ATTR_SYS      = 0x04,
+  FAT_ATTR_LABEL    = 0x08,
+  FAT_ATTR_DIR      = 0x10,
+  FAT_ATTR_ARCHIVE  = 0x20,
+  FAT_ATTR_LFN      = 0x0f,
+};
 
-typedef struct _boot_record_t {
-    u8 bs_jmpboot[3];
-    char bs_oemname[8];
-    u16 bpb_bytes_per_sec;
-    u8 bpb_sec_per_clus;
-    u16 bpb_rsvd_sec_cnt;
-    u8 bpb_num_fats;
-    u16 bpb_root_ent_cnt;
-    u16 bpb_total_sec16;
-    u8 bpb_media;
-    u16 bpb_fatsz16;
-    u16 bpb_sec_per_trk;
-    u16 bpb_num_heads;
-    u32 bpb_hidd_sec;
-    u32 bpb_total_sec32;
-    u32 bpb_fatsz32;
-    u16 bpb_ext_flags;
-    u16 bpb_fsver;
-    u32 bpb_root_clus;
-    u16 bpb_fsinfo;
-    u16 bpb_bk_boot_sec;
-    u8 bpb_reserved[12];
-    u8 bs_drv_num;
-    u8 bs_reserved1;
-    u8 bs_boot_sig;
-    u32 bs_vol_id;
-    u8 bs_vol_lab[11];
-    u64 bs_file_sys_type;
-    u8 boot_code[350];
-    u32 unique_disk_id;
-    u16 reserved2;
-    mbr_partition_t partitions[4];
-    u16 valid_sign;
-} __attribute__((packed)) boot_record_t;
+enum
+{
+  FAT_WRITE      = 0x01, // Open file for writing
+  FAT_READ       = 0x02, // Open file for reading
+  FAT_APPEND     = 0x04, // Set file offset to the end of the file
+  FAT_TRUNC      = 0x08, // Truncate the file after opening
+  FAT_CREATE     = 0x10, // Create the file if it do not exist
+
+  FAT_ACCESSED   = 0x20, // do not use (internal)
+  FAT_MODIFIED   = 0x40, // do not use (internal)
+  FAT_FILE_DIRTY = 0x80, // do not use (internal)
+};
+
+enum
+{
+  FAT_SEEK_START,
+  FAT_SEEK_CURR,
+  FAT_SEEK_END,
+};
+
+//------------------------------------------------------------------------------
+typedef struct
+{
+  bool (*read)(u8* buf, u32 sect);
+  bool (*write)(const u8* buf, u32 sect);
+} DiskOps;
+
+typedef struct
+{
+  u8 hour;
+  u8 min;
+  u8 sec;
+  u8 day;
+  u8 month;
+  u16 year;
+} Timestamp;
+
+typedef struct Fat
+{
+  struct Fat* next;
+  DiskOps ops;
+  u32 clust_msk;
+  u32 clust_cnt;
+  u32 info_sect;
+  u32 fat_sect[2];
+  u32 data_sect;  
+  u32 root_clust;
+  u32 last_used;
+  u32 free_cnt;
+  u32 sect;
+  u8 buf[512];
+  u8 flags;
+  u8 clust_shift;
+  u8 name_len;
+  char name[32];
+} Fat;
+
+typedef struct
+{
+  Timestamp created;
+  Timestamp modified;
+  u32 size;
+  u8 attr;
+  char name[255];
+  u8 name_len;
+} DirInfo;
+
+typedef struct
+{
+  Fat* fat;
+  u32 sclust;
+  u32 clust;
+  u32 sect;
+  u16 idx;
+} Dir;
+
+typedef struct
+{
+  Fat* fat;
+  u32 dir_sect;
+  u32 sclust;
+  u32 clust;
+  u32 sect;
+  u32 size;
+  u32 offset;
+  u16 dir_idx;
+  u8 attr;
+  u8 flags;
+  u8 buf[512];
+} File;
+
+//------------------------------------------------------------------------------
+const char* fat_get_error(int err);
+
+int fat_probe(DiskOps* ops, int partition);
+int fat_mount(DiskOps* ops, int partition, Fat* fat, const char* path);
+int fat_umount(Fat* fat);
+int fat_sync(Fat* fat);
+
+int fat_stat(const char* path, DirInfo* info);
+int fat_unlink(const char* path);
+
+int fat_file_open(File* file, const char* path, u8 flags);
+int fat_file_close(File* file);
+int fat_file_read(File* file, void* buf, int len, int* bytes);
+int fat_file_write(File* file, const void* buf, int len, int* bytes);
+int fat_file_seek(File* file, int offset, int seek);
+int fat_file_sync(File* file);
+
+int fat_dir_create(Dir* dir, const char* path);
+int fat_dir_open(Dir* dir, const char* path);
+int fat_dir_read(Dir* dir, DirInfo* info);
+int fat_dir_rewind(Dir* dir);
+int fat_dir_next(Dir* dir);
+
+void fat_get_timestamp(Timestamp* ts);
 
 
-// FAT 特殊簇值
-#define CLUSTER_FREE    0x00000000
-#define CLUSTER_BAD     0x0FFFFFF7
-#define CLUSTER_EOF_MIN 0x0FFFFFF8
-#define CLUSTER_EOF_MAX 0x0FFFFFFF
+//
+// VFS
+//
 
-typedef u32 fat_entry_t;
-
-// 文件属性定义
-#define ATTR_READ_ONLY  0x01
-#define ATTR_HIDDEN     0x02
-#define ATTR_SYSTEM     0x04
-#define ATTR_VOLUME_ID  0x08
-#define ATTR_DIRECTORY  0x10
-#define ATTR_ARCHIVE    0x20
-#define ATTR_LONG_NAME  0x0F
-
-typedef struct _fat_dir_entry_t {
-    u8 name[11];           // 8.3格式文件名（无点分隔）
-    u8 attr;               // 文件属性
-    u8 nt_reserved;        // NT保留字节
-    u8 crt_time_tenth;     // 创建时间的10毫秒单位
-    u16 crt_time;          // 创建时间
-    u16 crt_date;          // 创建日期
-    u16 lst_access_date;   // 最后访问日期
-    u16 cluster_high;      // 起始簇号的高16位（FAT32）
-    u16 wrt_time;          // 最后修改时间
-    u16 wrt_date;          // 最后修改日期
-    u16 cluster_low;       // 起始簇号的低16位
-    u32 file_size;         // 文件大小（字节）
-} __attribute__((packed)) fat_dir_entry_t;
-
-typedef struct _fat_lfn_entry_t {
-    u8 sequence;           // 序列号和标志位
-    u8 name1[10];          // 文件名第1部分 (UTF-16LE)
-    u8 attr;               // 属性 (总是 0x0F)
-    u8 type;               // 类型 (总是 0x00)
-    u8 checksum;           // 短文件名校验和
-    u8 name2[12];          // 文件名第2部分 (UTF-16LE)
-    u16 cluster_low;       // 总是 0x0000
-    u8 name3[4];           // 文件名第3部分 (UTF-16LE)
-} __attribute__((packed)) fat_lfn_entry_t;
-
-typedef struct fat32_sb_data_t {
-    u32 parti_start_lba;
-    u32 sector_count;
-
-    u32 fat1_start_lba;
-    u32 fat2_start_lba;
-    u32 data_start_lba;
-
-    fat_entry_t *fat1_data;
-    fat_entry_t *fat2_data;
-    u32 fat_sec;
-    
-    boot_record_t *pbr;
-} fat32_sb_data_t;
-
-typedef struct _fat32_inode_data_t {
-    u32 start_clus;
-    u32 start_lba;
-    u32 file_size;
-    u32 next_clus;
-
-    bool is_root;
-    fat_lfn_entry_t lfn_entry;
-    fat_dir_entry_t dir_entry;
+typedef struct {
+  Fat* fat;
+  u32 start_clus;
+  u32 file_size;
+  u8 attr;
+  bool is_root;
+  u32 dir_sect;
+  u16 dir_idx;
 } fat32_inode_data_t;
 
 void fat32_init();
@@ -130,5 +173,6 @@ i32 fat32_write(vfs_inode_t *, vfs_file_t *, i32 len, const char *buffer);
 i32 fat32_lseek(vfs_inode_t *, vfs_file_t *, i32 offset , i32 wence);
 
 i32 fat32_iterate(vfs_inode_t *, vfs_file_t *, char *path, i32 *filecnt, vfs_dirent_t **dirent);
+
 
 #endif

@@ -42,12 +42,11 @@ i32 ramfs_open(vfs_inode_t *, vfs_file_t *);
 i32 ramfs_close(vfs_inode_t *, vfs_file_t *);
 i32 ramfs_read(vfs_inode_t *, vfs_file_t *, i32 len, char *buffer);
 i32 ramfs_write(vfs_inode_t *, vfs_file_t *, i32 len, const char *buffer);
-
-// vfs_inode_t *ramfs_mount(vfs_inode_t *, const char *path, const char *fs_name);
+i32 ramfs_lseek(vfs_inode_t *, vfs_file_t *, i32 offset, i32 wence);
+i32 ramfs_iterate(vfs_inode_t *, vfs_file_t *, char *path, i32 *filecnt, vfs_dirent_t **dirent);
 
 bool _ustar_lookup(vfs_inode_t *inode, char *name, ramfs_ustar_data_t **out_data);
 void _ustar_remove_last_slash(char *path);
-void _ustar_add_last_slash(char *path);
 
 
 #endif

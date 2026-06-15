@@ -78,7 +78,8 @@ initrd:
 # limine
 limine:
 	git clone https://github.com/limine-bootloader/limine.git --branch v10.x-binary --depth=1
-	git clone https://github.com/limine-bootloader/limine-protocol.git --branch trunk --depth=1
+# 	git clone https://github.com/limine-bootloader/limine-protocol.git --branch trunk --depth=1
+	git clone https://github.com/limine-bootloader/limine-protocol.git && cd limine-protocol && git fetch --depth=1 origin 630686a3dd3ce40f9e510a7dd9fea6b4c60d952e && git checkout 630686a3dd3ce40f9e510a7dd9fea6b4c60d952e
 	make -C limine
 
 .PHONY: user

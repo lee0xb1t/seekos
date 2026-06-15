@@ -270,10 +270,10 @@ void kernel_main() {
 
     if (module_request.response) {
         for (int i = 0; i < module_request.response->module_count; i++) {
-            if (strcmp(module_request.response->modules[i]->string, "INITRD")) {
+            if (strcmp(module_request.response->modules[i]->string, "INITRD") == 0) {
                 void *module_addr = module_request.response->modules[i]->address;
                 size_t module_size = module_request.response->modules[i]->size;
-                vmm_map(module_addr, __VIRT_TO_PHYS(module_addr), SIZE_TO_PAGE(module_size), VMM_FLAGS_DEFAULT);
+                vmm_map(module_addr, __VIRT_TO_PHYS(module_addr), SIZE_TO_PAGE(PAGE_ALIGN_UP_IF(module_size)), VMM_FLAGS_DEFAULT);
                 ramfs_init( module_addr, module_size );
                 break;
             }
@@ -282,6 +282,7 @@ void kernel_main() {
 
     vfs_mount_fs("/", "fat32");
     vfs_mount_fs("/dev/ttyfs", "ttyfs");
+    vfs_mount_fs("/dev/ramfs", "ramfs");
 
 // #ifdef _TEST_CASE
 //     // vfs_inode_t *inode = vfs_resolve_path("/", R_CREATE, VFS_NODE_DIRECTOR);

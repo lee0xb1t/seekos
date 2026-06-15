@@ -37,22 +37,10 @@ char *strncpy(char *dest, const char *src, size_t len) {
     return dest + i;
 }
 
-bool strcmp(char *dest, const char *src) {
-    size_t dest_len = strlen(dest);
-    size_t src_len = strlen(src);
-
-    if (dest_len != src_len) {
-        return false;
+int strcmp(const char *str1, const char *str2) {
+    while (*str1 && *str1 == *str2) {
+        str1++;
+        str2++;
     }
-
-    for (int i = 0;; i++) {
-        if (dest[i] != src[i]) {
-            return false;
-        }
-
-        if (src[i] == '\0')
-            break;
-    }
-    
-    return true;
+    return (unsigned char)*str1 - (unsigned char)*str2;
 }
