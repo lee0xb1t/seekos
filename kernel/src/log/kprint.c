@@ -1,379 +1,174 @@
 #include <log/kprint.h>
-#include <lib/ktypes.h>
+#include <log/klog.h>
+#include <com/serial.h>
+#include <device/display/term.h>
+#include <lib/kcolor.h>
 #include <lib/kmemory.h>
 #include <lib/kstring.h>
 #include <mm/kmalloc.h>
-#include <fs/vfs.h>
 #include <panic/panic.h>
-#include <stdarg.h>
 
 
-#define KPRINT_MAX_BUFFER_SIZE      4096
+#define FMT_BUF_SIZE  1024
 
-/* Ascii Table */
-char kprint_at[2][16] = {
-    { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f' },
-    { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F' },
-};
+static klog_mode_t  g_mode  = KLOG_SERIAL;
+static klog_level_t g_level = KL_TRACE;
 
-int _ksprint_format_i32(char *s, int pos, i32 v) {
-    if (v == 0) {
-        s[pos++] = '0';
-        return pos;
-    }
+static const char hex_lower[] = "0123456789abcdef";
+static const char hex_upper[] = "0123456789ABCDEF";
 
-    int base = 10;
 
-    i32 temp;
-    bool negative = false;
-    
-    if (v < 0) {
-        negative = true;
-        temp = (~v) + 1;
-    } else {
-        temp = v;
-    }
+void klog_set_mode(klog_mode_t mode) { g_mode = mode; }
+void klog_set_level(klog_level_t lv)  { g_level = lv; }
 
-    char buffer[32] = { 0 };
-
-    size_t count = 0;
-
-    while (temp > 0) {
-        int number_bit = temp % base;
-        buffer[count++] = kprint_at[0][number_bit];
-        temp /= base;
-    }
-
-    size_t halfcount = count & ~((size_t)1);
-    halfcount /= 2;
-
-    for (size_t i = 0; i < halfcount; i++) {
-        int ch = buffer[i];
-        buffer[i] = buffer[count - 1 - i];
-        buffer[count - 1 - i] = ch;
-    }
-
-    if (negative) {
-        s[pos++] = '-';
-    }
-
-    return _ksprint_format_string(s, pos, buffer);
+void klog_serial_putch(char ch) {
+    if (ch == '\n')
+        serial_write('\r');
+    serial_write((u8)ch);
 }
 
-int _ksprint_format_u32(char *s, int pos, u32 v) {
-    if (v == 0) {
-        s[pos++] = '0';
-        return pos;
-    }
 
-    int base = 10;
-
-    u32 temp;
-    bool negative = false;
-    
-    if (v < 0) {
-        negative = true;
-        temp = (~v) + 1;
-    } else {
-        temp = v;
-    }
-
-    char buffer[32] = { 0 };
-
-    size_t count = 0;
-
-    while (temp > 0) {
-        int number_bit = temp % base;
-        buffer[count++] = kprint_at[0][number_bit];
-        temp /= base;
-    }
-
-    size_t halfcount = count & ~((size_t)1);
-    halfcount /= 2;
-
-    for (size_t i = 0; i < halfcount; i++) {
-        int ch = buffer[i];
-        buffer[i] = buffer[count - 1 - i];
-        buffer[count - 1 - i] = ch;
-    }
-
-    if (negative) {
-        s[pos++] = '-';
-    }
-
-    return _ksprint_format_string(s, pos, buffer);
-}
-
-int _ksprint_format_i64(char *s, int pos, i64 v) {
-    if (v == 0) {
-        s[pos++] = '0';
-        return pos;
-    }
-
-    int base = 10;
-    i64 temp;
-    bool negative = false;
-    
-    if (v < 0) {
-        negative = true;
-        temp = (~v) + 1;
-    } else {
-        temp = v;
-    }
-
-    char buffer[32] = { 0 };
-
-    size_t count = 0;
-
-    while (temp > 0) {
-        int number_bit = temp % base;
-        buffer[count++] = kprint_at[0][number_bit];
-        temp /= base;
-    }
-
-    size_t halfcount = count & ~((size_t)1);
-    halfcount /= 2;
-
-    for (size_t i = 0; i < halfcount; i++) {
-        int ch = buffer[i];
-        buffer[i] = buffer[count - 1 - i];
-        buffer[count - 1 - i] = ch;
-    }
-
-    if (negative) {
-        s[pos++] = '-';
-    }
-
-    return _ksprint_format_string(s, pos, buffer);
-}
-
-int _ksprint_format_u64(char *s, int pos, u64 v) {
-    if (v == 0) {
-        s[pos++] = '0';
-        return pos;
-    }
-
-    int base = 10;
-    u64 temp;
-    bool negative = false;
-    
-    if (v < 0) {
-        negative = true;
-        temp = (~v) + 1;
-    } else {
-        temp = v;
-    }
-
-    char buffer[32] = { 0 };
-
-    size_t count = 0;
-
-    while (temp > 0) {
-        int number_bit = temp % base;
-        buffer[count++] = kprint_at[0][number_bit];
-        temp /= base;
-    }
-
-    size_t halfcount = count & ~((size_t)1);
-    halfcount /= 2;
-
-    for (size_t i = 0; i < halfcount; i++) {
-        int ch = buffer[i];
-        buffer[i] = buffer[count - 1 - i];
-        buffer[count - 1 - i] = ch;
-    }
-
-    if (negative) {
-        s[pos++] = '-';
-    }
-
-    return _ksprint_format_string(s, pos, buffer);
-}
-
-int _ksprint_format_hex(char *s, int pos, u64 v, i32 wordcase) {
-    if (v == 0) {
-        s[pos++] = '0';
-        return pos;
-    }
-
-    int base = 16;
-    u64 temp = v;
-    char buffer[32] = { 0 };
-    size_t count = 0;
-
-    while (temp > 0) {
-        int number_bit = temp % base;
-        buffer[count++] = kprint_at[wordcase][number_bit];
-        temp /= base;
-    }
-
-    size_t halfcount = count & ~((size_t)1);
-    halfcount /= 2;
-
-    for (size_t i = 0; i < halfcount; i++) {
-        int ch = buffer[i];
-        buffer[i] = buffer[count - 1 - i];
-        buffer[count - 1 - i] = ch;
-    }
-
-    return _ksprint_format_string(s, pos, buffer);
-}
-
-int _ksprint_format_binary(char *s, int pos, u64 v) {
-    if (v == 0) {
-        s[pos++] = '0';
-        return pos;
-    }
-
-    int base = 2;
-    u64 temp = v;
-    char buffer[65] = { 0 };
-    size_t count = 0;
-
-    while (temp > 0) {
-        int number_bit = temp % base;
-        buffer[count++] = kprint_at[0][number_bit];
-        temp /= base;
-    }
-
-    size_t halfcount = count & ~((size_t)1);
-    halfcount /= 2;
-
-    for (size_t i = 0; i < halfcount; i++) {
-        int ch = buffer[i];
-        buffer[i] = buffer[count - 1 - i];
-        buffer[count - 1 - i] = ch;
-    }
-
-    return _ksprint_format_string(s, pos, buffer);
-}
-
-int _ksprint_format_string(char *s, int pos, char *v) {
-    while (*v) {
-        s[pos++] = *v++;
-    }
+static int _fmt_u64(char *buf, int pos, u64 v, int base, const char *table) {
+    if (v == 0) { buf[pos++] = '0'; return pos; }
+    char tmp[32];
+    int cnt = 0;
+    while (v) { tmp[cnt++] = table[v % base]; v /= base; }
+    while (cnt) buf[pos++] = tmp[--cnt];
     return pos;
 }
 
-void ksprintf(char *s, int n, const char *format, ...) {
-    va_list vl;
-    va_start(vl, format);
-    ksprintv(s, n, format, vl);
-    va_end(vl);
+static int _fmt_i64(char *buf, int pos, i64 v) {
+    if (v == 0) { buf[pos++] = '0'; return pos; }
+    if (v < 0) { buf[pos++] = '-'; v = -v; }
+    return _fmt_u64(buf, pos, (u64)v, 10, hex_lower);
 }
 
-void ksprintv(char *s, int n, const char *format, va_list vl) {
+static int _fmt_str(char *buf, int pos, const char *s) {
+    if (!s) s = "(null)";
+    while (*s) buf[pos++] = *s++;
+    return pos;
+}
+
+
+int kvsnprintf(char *buf, size_t n, const char *fmt, va_list args) {
+    if (!buf || !n) return 0;
     int pos = 0;
-    for (int i = 0; format[i] != '\0'; i++) {
-        if (pos >= n) {
-            panic("[KPRINT] buffer is small");
-        }
-        char ch = format[i];
-        switch (ch)
-        {
-        case '%': {
-            char next = format[++i];
-            switch (next)
-            {
-            case '%':
-                //klog_char(color, '%');
-                s[pos++] = '%';
-                break;
-            case 'd':
-                //klog_int32(color, va_arg(vl, i32));
-                pos = _ksprint_format_i32(s, pos, va_arg(vl, i32));
-                break;
-            case 'q':
-                //klog_int64(color, va_arg(vl, i64));
-                pos = _ksprint_format_i64(s, pos, va_arg(vl, i64));
-                break;
-            case 'x':
-                //klog_hex(color, va_arg(vl, u64), 0);
-                pos = _ksprint_format_hex(s, pos, va_arg(vl, u64), 0);
-                break;
-            case 'X':
-                //klog_hex(color, va_arg(vl, u64), 1);
-                pos = _ksprint_format_hex(s, pos, va_arg(vl, u64), 1);
-                break;
-            case 'p':
-                //klog_string(color, "0x");
-                pos = _ksprint_format_string(s, pos, "0x");
-                // klog_hex(color, va_arg(vl, u64), 0);
-                pos = _ksprint_format_hex(s, pos, va_arg(vl, u64), 0);
-                break;
-            case 'b':
-                // klog_binary(color, va_arg(vl, u64));
-                pos = _ksprint_format_binary(s, pos, va_arg(vl, u64));
-                break;
-            case 's':
-                //klog_string(color, va_arg(vl, char*));
-                pos = _ksprint_format_string(s, pos, va_arg(vl, char*));
-                break;
-            case 'c':
-                //klog_char(color, va_arg(vl, char));
-                s[pos++] = va_arg(vl, char);
-                break;
-            case 'u': {
-                switch (format[i+1])
-                {
-                case 'd':
-                    pos = _ksprint_format_u32(s, pos, va_arg(vl, u32));
-                    ++i;
-                    break;
-                case 'q':
-                    pos = _ksprint_format_u64(s, pos, va_arg(vl, u64));
-                    ++i;
-                    break;
-                default:
-                    s[pos++] = ch;
-                    s[pos++] = next;
-                    break;
-                }
-                break;
-            }
-            default:
-                s[pos++] = ch;
-                s[pos++] = next;
-                break;
-            }
-            
+    size_t end = n - 1;
+
+    for (int i = 0; fmt[i] && (size_t)pos < end; i++) {
+        char ch = fmt[i];
+
+        if (ch == '\r') { pos = 0; continue; }
+
+        if (ch != '%') { buf[pos++] = ch; continue; }
+
+        ch = fmt[++i];
+        if (!ch) break;
+
+        if (ch == '%') { buf[pos++] = '%'; continue; }
+
+        int lflag = 0;
+        if (ch == 'l') { lflag = 1; ch = fmt[++i]; if (ch == 'l') { lflag = 2; ch = fmt[++i]; } }
+
+        switch (ch) {
+        case 'd':
+            if (lflag == 2) pos = _fmt_i64(buf, pos, va_arg(args, i64));
+            else if (lflag == 1) pos = _fmt_i64(buf, pos, va_arg(args, long));
+            else pos = _fmt_i64(buf, pos, va_arg(args, int));
             break;
-        }   // case '%':
+        case 'q':
+            pos = _fmt_i64(buf, pos, va_arg(args, i64));
+            break;
+        case 'u': {
+            char nxt = fmt[i + 1];
+            if (nxt == 'd') { i++; pos = _fmt_u64(buf, pos, va_arg(args, u32), 10, hex_lower); }
+            else if (nxt == 'q') { i++; pos = _fmt_u64(buf, pos, va_arg(args, u64), 10, hex_lower); }
+            else if (lflag == 2) pos = _fmt_u64(buf, pos, va_arg(args, u64), 10, hex_lower);
+            else if (lflag == 1) pos = _fmt_u64(buf, pos, va_arg(args, unsigned long), 10, hex_lower);
+            else pos = _fmt_u64(buf, pos, va_arg(args, unsigned int), 10, hex_lower);
+            break; }
+        case 'x':
+            if (lflag) pos = _fmt_u64(buf, pos, va_arg(args, u64), 16, hex_lower);
+            else pos = _fmt_u64(buf, pos, va_arg(args, unsigned int), 16, hex_lower);
+            break;
+        case 'X':
+            if (lflag) pos = _fmt_u64(buf, pos, va_arg(args, u64), 16, hex_upper);
+            else pos = _fmt_u64(buf, pos, va_arg(args, unsigned int), 16, hex_upper);
+            break;
+        case 'p':
+            buf[pos++] = '0'; buf[pos++] = 'x';
+            pos = _fmt_u64(buf, pos, va_arg(args, u64), 16, hex_lower);
+            break;
+        case 's':
+            pos = _fmt_str(buf, pos, va_arg(args, const char*));
+            break;
+        case 'c':
+            buf[pos++] = (char)va_arg(args, int);
+            break;
+        case 'b':
+            pos = _fmt_u64(buf, pos, va_arg(args, u64), 2, hex_lower);
+            break;
         default:
-            s[pos++] = ch;
+            buf[pos++] = '%'; buf[pos++] = ch;
             break;
         }
     }
+    buf[pos] = '\0';
+    return pos;
 }
 
-void kprintf(const char *format, ...) {
-    va_list vl;
-    va_start(vl, format);
-    kprintv(format, vl);
-    va_end(vl);
+
+int ksnprintf(char *buf, size_t n, const char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    int r = kvsnprintf(buf, n, fmt, args);
+    va_end(args);
+    return r;
 }
 
-void kprintv(const char *format, va_list vl) {
-    char *s = (char *)kzalloc(KPRINT_MAX_BUFFER_SIZE);
-    ksprintv(s, KPRINT_MAX_BUFFER_SIZE, format, vl);
-    vfs_handle_t fh = vfs_open_console("/dev/ttyfs", VFS_STDOUT);
-    vfs_write(fh, strlen(s), s);
-    vfs_close(fh);
-    kfree(s);
+
+int kprint_core(u32 color, const char *fmt, va_list args) {
+    char buf[FMT_BUF_SIZE];
+    int len = kvsnprintf(buf, sizeof(buf), fmt, args);
+
+    if (g_mode == KLOG_SERIAL) {
+        for (int i = 0; i < len; i++)
+            klog_serial_putch(buf[i]);
+    } else {
+        term_color_push(color);
+        term_write(buf);
+        term_color_pop();
+        term_flush();
+    }
+    return len;
 }
 
-void kerrf(const char *format, ...) {
-    va_list vl;
-    va_start(vl, format);
-    kerrv(format, vl);
-    va_end(vl);
+
+int kprintf_color(u32 color, const char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    int r = kprint_core(color, fmt, args);
+    va_end(args);
+    return r;
 }
 
-void kerrv(const char *format, va_list vl) {
-    char *s = (char *)kzalloc(KPRINT_MAX_BUFFER_SIZE);
-    ksprintv(s, KPRINT_MAX_BUFFER_SIZE, format, vl);
-    vfs_handle_t fh = vfs_open_console("/dev/ttyfs", VFS_STDERR);
-    vfs_write(fh, strlen(s), s);
-    vfs_close(fh);
-    kfree(s);
+
+u32 klog_level_color(klog_level_t lv) {
+    switch (lv) {
+    case KL_TRACE: return COLOR_GARY;
+    case KL_DEBUG: return COLOR_WHITE;
+    case KL_INFO:  return COLOR_GREEN;
+    case KL_WARN:  return COLOR_YELLOW;
+    case KL_ERROR: return COLOR_RED;
+    default:       return COLOR_WHITE;
+    }
+}
+
+void klog_write(klog_level_t lv, const char *fmt, ...) {
+    if (lv < g_level) return;
+
+    va_list args;
+    va_start(args, fmt);
+    kprint_core(klog_level_color(lv), fmt, args);
+    va_end(args);
 }
