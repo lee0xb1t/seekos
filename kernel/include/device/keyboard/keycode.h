@@ -91,6 +91,8 @@
 #define KEY_F12		    85
 #define KEY_LEFTSQUARE  86
 #define KEY_RIGHTSQUARE	87
+#define KEY_RIGHTCTRL   88
+#define KEY_RIGHTALT    89
 
 
 u16 keycode_get_by_scancode(u8 scancode);

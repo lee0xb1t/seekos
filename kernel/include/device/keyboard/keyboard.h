@@ -22,7 +22,7 @@
 
 #define KEYBOARD_SCANCODE_KEYPAD        0xe0
 
-#define KEYBOARD_SCANCODE_RESELASE      0x80
+#define KEYBOARD_SCANCODE_RELEASE      0x80
 
 
 typedef struct _keyboard_data_t {

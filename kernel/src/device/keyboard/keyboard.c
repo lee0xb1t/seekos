@@ -9,14 +9,17 @@
 #include <proc/kevent.h>
 
 
-static bool is_keypad = false;
+static bool is_extended = false;
 static bool capslock_state = false;
 static bool scrolllock_state = false;
 static bool numlock_state = false;
 
-static bool keystate_ctrl = false;
-static bool keystate_shift = false;
-static bool keystate_alt = false;
+static bool keystate_lctrl = false;
+static bool keystate_rctrl = false;
+static bool keystate_lshift = false;
+static bool keystate_rshift = false;
+static bool keystate_lalt = false;
+static bool keystate_ralt = false;
 
 
 void _process_scan_code(u8 scancode);
@@ -27,7 +30,6 @@ void keyboard_callback(trapframe_t *trapframe) {
     u8 status = port_inb(PS2_PORT_STATUS);
 
     if (!(status & PS2_STATUS_OUTPUT_BUFFER_FULL)) {
-        // No data
         goto _end;
     }
 
@@ -62,18 +64,19 @@ void keyboard_init() {
 }
 
 void _process_scan_code(u8 scancode) {
-    u16 keycode;
 
     if (scancode == KEYBOARD_SCANCODE_KEYPAD) {
-        is_keypad = true;
+        is_extended = true;
+        return;
     }
 
-    bool is_pressed = (scancode & KEYBOARD_SCANCODE_RESELASE) == 0;
-    u8 base_scancode = (scancode & (~KEYBOARD_SCANCODE_RESELASE));
+    bool is_pressed = (scancode & KEYBOARD_SCANCODE_RELEASE) == 0;
+    u8 base_scancode = (scancode & (~KEYBOARD_SCANCODE_RELEASE));
 
-    if (is_keypad) {
-        // TODO
-        is_keypad = false;
+    u16 keycode;
+    if (is_extended) {
+        keycode = keycode_get_keypad_by_scancode(base_scancode);
+        is_extended = false;
     } else {
         keycode = keycode_get_by_scancode(base_scancode);
     }
@@ -83,82 +86,68 @@ void _process_scan_code(u8 scancode) {
         return;
     }
 
-    if (!is_pressed) {
-        bool update_leds = false;
-
+    if (is_pressed) {
         switch(keycode) {
             case KEY_CAPSLOCK:
                 capslock_state = !capslock_state;
-                update_leds = true;
                 klogd("[KEYBOARD]  capslock %s\n", capslock_state ? "on" : "off");
                 break;
             case KEY_SCROLLLOCK:
                 scrolllock_state = !scrolllock_state;
-                update_leds = true;
                 klogd("[KEYBOARD]  scroll lock %s\n", scrolllock_state ? "on" : "off");
                 break;
             case KEY_NUMLOCK:
                 numlock_state = !numlock_state;
-                update_leds = true;
                 klogd("[KEYBOARD]  numlock %s\n", numlock_state ? "on" : "off");
                 break;
             default:
                 break;
-        }
-
-        if (update_leds) {
-            // TODO
         }
     }
 
     /* key state */
     _set_key_state(keycode, is_pressed);
 
-    // send event
+    bool ctrl = keystate_lctrl || keystate_rctrl;
+    bool shift = keystate_lshift || keystate_rshift;
+    bool alt = keystate_lalt || keystate_ralt;
+
     keyboard_data_t data = {
-        .key_state_ctrl = keystate_ctrl,
-        .key_state_shift = keystate_shift,
-        .key_state_alt = keystate_alt,
+        .key_state_ctrl = ctrl,
+        .key_state_shift = shift,
+        .key_state_alt = alt,
         .key_code = keycode,
         .key_pressed = is_pressed,
-        .key_pad = is_keypad
+        .key_pad = false,
     };
     kevent_publish(EV_KEYBOARD, data.flags);
 }
 
 void _set_key_state(u8 keycode, bool ispressed) {
     switch (keycode) {
-        case KEY_LEFTCTRL: {
-            if (ispressed) {
-                keystate_ctrl = true;
-                return;
-            } else {
-                keystate_ctrl = false;
-            }
+        case KEY_LEFTCTRL:
+            keystate_lctrl = ispressed;
             break;
-        }
+
+        case KEY_RIGHTCTRL:
+            keystate_rctrl = ispressed;
+            break;
 
         case KEY_LEFTSHIFT:
+            keystate_lshift = ispressed;
+            break;
+
         case KEY_RIGHTSHIFT:
-        {
-            if (ispressed) {
-                keystate_shift = true;
-                return;
-            } else {
-                keystate_shift = false;
-            }
+            keystate_rshift = ispressed;
             break;
-        }
-        
-        case KEY_LEFTALT: {
-            if (ispressed) {
-                keystate_alt = true;
-                return;
-            } else {
-                keystate_alt = false;
-            }
+
+        case KEY_LEFTALT:
+            keystate_lalt = ispressed;
             break;
-        }
+
+        case KEY_RIGHTALT:
+            keystate_ralt = ispressed;
+            break;
 
         default:
             break;

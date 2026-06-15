@@ -136,7 +136,13 @@ static char key_ascii[][2] = {
     { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 },
     { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 },
     { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 },
-    { 0, 0 }, { 0, 0 }, { 0, 0 },
+    { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 },
+    { 0, 0 }, { 0, 0 },
+};
+
+static u16 extended_scancode_to_keycode[128] = {
+    [0x1D] = KEY_RIGHTCTRL,
+    [0x38] = KEY_RIGHTALT,
 };
 
 u16 keycode_get_by_scancode(u8 scancode) {
@@ -144,7 +150,10 @@ u16 keycode_get_by_scancode(u8 scancode) {
 }
 
 u16 keycode_get_keypad_by_scancode(u8 scancode) {
-
+    u16 keycode = extended_scancode_to_keycode[scancode];
+    if (keycode == 0)
+        return KEY_RESERVED;
+    return keycode;
 }
 
 char keyecode_to_ascii(u8 keycode, bool isupper) {
