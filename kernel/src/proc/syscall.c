@@ -155,8 +155,8 @@ i32 sys_sleep(i32 millis) {
     return 0;
 }
 
-void sys_execve(const char *path, int argc, char **argv) {
-    sched_execve(path, argc, argv, null, 0, null);
+i32 sys_execve(const char *path, int argc, char **argv) {
+    return sched_execve(path, argc, argv, null, 0, null);
 }
 
 i32 sys_wait(u32 id) {

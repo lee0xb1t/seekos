@@ -39,7 +39,7 @@ void sys_vfree(void *ptr);
 i32 sys_readdir(i32 h, void *data, int sz);
 u32 sys_fork();
 i32 sys_sleep(i32 millis);
-void sys_execve(const char *path, int argc, char **argv);
+i32 sys_execve(const char *path, int argc, char **argv);
 i32 sys_wait(u32 id);
 void sys_getcwd(char *buf, size_t len);
 i32 sys_chdir(char *path);

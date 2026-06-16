@@ -307,62 +307,67 @@ void sched_add(task_t *t) {
     
 }
 
-void sched_execve(const char *path, int argc, char **argv, char *cwd, int envc, char **envp) {
+i32 sched_execve(const char *path, int argc, char **argv, char *cwd, int envc, char **envp) {
 	u64 flags;
 	char temp_path[VFS_MAX_PATH_LENGTH] = {0};
-	memcpy(temp_path, path, strlen(path));
 
+	if (!path || !strlen(path))
+		return -1;
+
+	memcpy(temp_path, path, strlen(path));
 	char *exec_name = _get_exec_name(temp_path);
 
 	spin_lock_irq(&sched_lock, flags);
 
 	task_t *now = sched_get_task();
-	if (now) {
-		int saved_envc = now->u_envc;
-		char *saved_envp = null;
-		if (saved_envc > 0 && now->u_envp) {
-			saved_envp = kzalloc(saved_envc * TASK_MAX_ARGV_LEN);
-			memcpy(saved_envp, now->u_envp, saved_envc * TASK_MAX_ARGV_LEN);
-		}
-
-		task_setup_path(now, temp_path);
-		task_setup_argv(now, argc, argv);
-		char *new_argv = now->u_argv;
-		int new_argc = now->u_argc;
-
-		char *new_envp = null;
-		int new_envc = 0;
-		if (envc > 0) {
-			task_setup_env(now, envc, envp);
-			new_envp = now->u_envp;
-			new_envc = now->u_envc;
-		}
-
-		task_replace(now, exec_name);
-
-		now->u_argv = new_argv;
-		now->u_argc = new_argc;
-
-		if (envc > 0) {
-			now->u_envp = new_envp;
-			now->u_envc = new_envc;
-		} else if (saved_envp) {
-			now->u_envc = saved_envc;
-			now->u_envp = saved_envp;
-		}
-
-		spin_unlock_irq(&sched_lock, flags);
-		sched_again();
-	} else {
+	if (!now) {
 		task_t *task = task_create(exec_name, null, 255, TASK_USER_MODE);
+		if (!task) {
+			spin_unlock_irq(&sched_lock, flags);
+			return -1;
+		}
 		task_setup_path(task, path);
 		task_setup_argv(task, argc, argv);
-		task_setup_cwd(task, cwd);
+		if (cwd)
+			task_setup_cwd(task, cwd);
 		if (envc > 0)
 			task_setup_env(task, envc, envp);
 		spin_unlock_irq(&sched_lock, flags);
 		sched_add(task);
+		return 0;
 	}
+
+	char *free_argv = now->u_argv;
+	char *free_envp = now->u_envp;
+
+	task_setup_path(now, temp_path);
+	task_setup_argv(now, argc, argv);
+	if (envc > 0)
+		task_setup_env(now, envc, envp);
+
+	char *new_argv = now->u_argv;
+	char *new_envp = now->u_envp;
+	int new_argc = now->u_argc;
+	int new_envc = now->u_envc;
+
+	now->u_argv = null;
+	now->u_envp = null;
+
+	task_replace(now, exec_name);
+
+	now->u_argv = new_argv;
+	now->u_envp = new_envp;
+	now->u_argc = new_argc;
+	now->u_envc = new_envc;
+
+	spin_unlock_irq(&sched_lock, flags);
+
+	if (free_argv) kfree(free_argv);
+	if (free_envp) kfree(free_envp);
+
+	sched_again();
+
+	return -1;
 }
 
 i32 _sched_do_execve() {
@@ -378,20 +383,15 @@ i32 _sched_do_execve() {
     vfs_open_console("/dev/ttyfs", VFS_STDOUT);
     vfs_open_console("/dev/ttyfs", VFS_STDERR);
 
-	if (task->is_fork) {
-		if (task->ustack_ptr) {
-			task_setup_ustack(task, task->ustack_ptr, TASK_STACK_SIZE_32KB);
-		}
-		task_setup_routine(task, task->auxv.entry);
-		task->is_fork = false;
-	} else {
+    if (task->is_fork) {
+    } else {
         if (elf_load(task, task->execve_path) != 0) {
             sched_exit(-1);
             return -1;
         }
+        task_init_ustack(task);
     }
 
-    task_init_ustack(task);
     return 0;
 }
 
@@ -432,6 +432,12 @@ u32 sched_fork() {
 	spin_lock_irq(&sched_lock, flags);
 
 	task_t *t = sched_get_task();
+
+	if (t->is_fork) {
+		t->is_fork = false;
+		spin_unlock_irq(&sched_lock, flags);
+		return 0;
+	}
 
 	task_t *n = task_fork(t);
     if (!n) {

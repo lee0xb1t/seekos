@@ -37,11 +37,9 @@ static void env_parse(char **envp) {
     }
 }
 
-
 static const char *get_path(void) {
     return path_env;
 }
-
 
 static void resolve_path(const char *cmd, char *out, size_t outsz) {
     if (strchr(cmd, '/')) {
@@ -49,8 +47,7 @@ static void resolve_path(const char *cmd, char *out, size_t outsz) {
         return;
     }
 
-    const char *path = get_path();
-    const char *p = path;
+    const char *p = get_path();
     while (*p) {
         const char *end = strchr(p, ':');
         if (!end) end = p + strlen(p);
@@ -74,7 +71,6 @@ next:
 
     snprintf(out, outsz, "/bin/%s", cmd);
 }
-
 
 static char *get_cwd(void) {
     memset(cwd, 0, sizeof(cwd));
@@ -102,21 +98,39 @@ static void builtin_ls(struct cmd_parse *p) {
         return;
     }
     struct dirent *entries = readdir(dp);
-    for (int i = 0; i < dp->cnt; i++)
-        printf("%s  ", entries[i].name);
-    printf("\n");
+    if (entries) {
+        for (int i = 0; i < dp->cnt; i++)
+            printf("%s  ", entries[i].name);
+        printf("\n");
+    }
     closedir(dp);
 }
 
 static void builtin_help(struct cmd_parse *p) {
     (void)p;
-    printf("builtins: cd  ls  pwd  help\n");
+    printf("builtins: cd  ls  pwd  echo  help\n");
 }
 
 static void builtin_echo(struct cmd_parse *p) {
     for (int i = 1; i < p->cnt; i++)
         printf("%s ", p->args[i]);
     printf("\n");
+}
+
+static const struct builtin builtins[] = {
+    {"cd",   builtin_cd},
+    {"ls",   builtin_ls},
+    {"pwd",  builtin_pwd},
+    {"echo", builtin_echo},
+    {"help", builtin_help},
+};
+
+static builtin_fn find_builtin(const char *name) {
+    size_t n = sizeof(builtins) / sizeof(builtins[0]);
+    for (size_t i = 0; i < n; i++)
+        if (strcmp(builtins[i].name, name) == 0)
+            return builtins[i].fn;
+    return null;
 }
 
 
@@ -137,10 +151,8 @@ static void parse_cmd(const char *s, struct cmd_parse *p) {
     memset(p->raw, 0, slen + 1);
     memcpy(p->raw, s, slen);
 
-    size_t end = slen + 1;
-    char  *tok = p->raw;
-
-    for (size_t i = 0; i < end; i++) {
+    char *tok = p->raw;
+    for (size_t i = 0; i <= slen; i++) {
         if (p->raw[i] == ' ' || p->raw[i] == '\0') {
             p->raw[i] = '\0';
             size_t tlen = strlen(tok);
@@ -156,28 +168,23 @@ static void parse_cmd(const char *s, struct cmd_parse *p) {
     }
 }
 
-
 static char *read_line(void) {
     memset(input_buf, 0, sizeof(input_buf));
     scanf("%s", input_buf);
     return input_buf;
 }
 
+static void run_external(struct cmd_parse *p) {
+    char path[256];
+    resolve_path(p->args[0], path, sizeof(path));
 
-static const struct builtin builtins[] = {
-    {"cd",   builtin_cd},
-    {"ls",   builtin_ls},
-    {"pwd",  builtin_pwd},
-    {"help", builtin_help},
-    {"echo", builtin_echo},
-};
-
-static builtin_fn find_builtin(const char *name) {
-    size_t n = sizeof(builtins) / sizeof(builtins[0]);
-    for (size_t i = 0; i < n; i++)
-        if (strcmp(builtins[i].name, name) == 0)
-            return builtins[i].fn;
-    return null;
+    u32 pid = sys_fork();
+    if (pid == 0) {
+        sys_execve(path, p->cnt, p->args);
+        dprintf(STDERR, "exec '%s' failed\n", path);
+        sys_user_exit();
+    }
+    sys_wait(pid);
 }
 
 
@@ -194,23 +201,13 @@ int main(int argc, char **argv, char **envp) {
 
         parse_cmd(line, &parse);
         if (!parse.cnt) continue;
-        printf(line);
 
-        // builtin_fn fn = find_builtin(parse.args[0]);
-        // if (fn) {
-        //     fn(&parse);
-        // } else {
-        //     char path[256];
-        //     resolve_path(parse.args[0], path, sizeof(path));
-
-        //     u32 pid = sys_fork();
-        //     if (pid == 0) {
-        //         printf("%s\n", path);
-        //         sys_execve(path, parse.cnt, parse.args);
-        //     } else {
-        //         sys_wait(pid);
-        //     }
-        // }
+        builtin_fn fn = find_builtin(parse.args[0]);
+        if (fn) {
+            fn(&parse);
+        } else {
+            run_external(&parse);
+        }
 
         parse_free(&parse);
     }

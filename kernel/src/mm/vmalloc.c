@@ -185,20 +185,35 @@ mm_struct_t *mm_copy(mm_struct_t *p) {
     mm_struct_t *n = mm_create();
     if (!n) return null;
 
+    u8 *page_buf = (u8 *)kmalloc(PAGE_SIZE);
+    if (!page_buf) {
+        mm_free(n);
+        return null;
+    }
+
     spin_lock(&p->vm_area_lock);
     dlist_foreach(&p->vm_area_head, entry) {
         vm_area_t *vmarea = dlist_container_of(entry, vm_area_t, list_entry);
         size_t sz = vmarea->vm_end - vmarea->vm_start;
-        void *temp_ptr = kzalloc(sz);
-        if (!temp_ptr) continue;
-        memcpy(temp_ptr, (void *)vmarea->vm_start, sz);
+
         void *ptr = vmalloc(n, (void *)vmarea->vm_start, sz, vmarea->vm_flags);
-        if (ptr)
-            mm_write(n, ptr, temp_ptr, sz);
-        kfree(temp_ptr);
+        if (!ptr) {
+            spin_unlock(&p->vm_area_lock);
+            mm_free(n);
+            kfree(page_buf);
+            return null;
+        }
+
+        for (uptr va = (uptr)vmarea->vm_start; va < (uptr)vmarea->vm_end; va += PAGE_SIZE) {
+            size_t chunk = sz - (va - (uptr)vmarea->vm_start);
+            if (chunk > PAGE_SIZE) chunk = PAGE_SIZE;
+            memcpy(page_buf, (void *)va, chunk);
+            mm_write(n, (void *)va, page_buf, chunk);
+        }
     }
     spin_unlock(&p->vm_area_lock);
 
+    kfree(page_buf);
     return n;
 }
 

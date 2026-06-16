@@ -77,13 +77,7 @@ void smp_init() {
 }
 
 void smp_ap_entry(cpu_ctrl_t *cpu_ctrl) {
-    klogi("!!!smp_ap_entry!!!\n");
-
-    asm volatile("xorq %%rax, %%rax; "
-                 "movq %%rax, %%dr0; movq %%rax, %%dr1; "
-                 "movq %%rax, %%dr2; movq %%rax, %%dr3; "
-                 "movq %%rax, %%dr6; movq %%rax, %%dr7"
-                 : : : "rax");
+    klogd("!!!smp_ap_entry!!!\n");
 
     cpu_feature_init();
 

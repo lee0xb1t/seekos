@@ -144,8 +144,10 @@ void task_free(task_t *t) {
 }
 
 void task_free_phase0(task_t *t) {
-    if (t->mode == TASK_USER_MODE && t->ustack_ptr)
+    if (t->mode == TASK_USER_MODE && t->ustack_ptr) {
         vfree(t->mm, t->ustack_ptr);
+        t->ustack_ptr = null;
+    }
 
     if (t->u_argv) {
         kfree(t->u_argv);
@@ -233,7 +235,8 @@ task_t *task_fork(task_t *p) {
     }
     memcpy(c, p, sizeof(task_t));
 
-    c->tgid = c->tid = _alloc_tid();
+    c->tgid = p->tgid;
+    c->tid = _alloc_tid();
     c->mm = mm_copy(p->mm);
     if (!c->mm) {
         kfree(c);
@@ -267,6 +270,27 @@ task_t *task_fork(task_t *p) {
     c->is_fork = true;
 
     _task_setup_kstack_user(c, false);
+
+    uptr p_top = (uptr)p->klimit + TASK_STACK_SIZE_32KB;
+
+    c->trap_frame->rip    = *(u64 *)(p_top - 8);
+    c->trap_frame->rflags = *(u64 *)(p_top - 16);
+    c->trap_frame->rsp    = (u64)percpu()->ustack;
+
+    c->trap_frame->rcx = *(u64 *)(p_top - 24);
+    c->trap_frame->rdx = *(u64 *)(p_top - 32);
+    c->trap_frame->rbx = *(u64 *)(p_top - 40);
+    c->trap_frame->rbp = *(u64 *)(p_top - 48);
+    c->trap_frame->rsi = *(u64 *)(p_top - 56);
+    c->trap_frame->rdi = *(u64 *)(p_top - 64);
+    c->trap_frame->r8  = *(u64 *)(p_top - 72);
+    c->trap_frame->r9  = *(u64 *)(p_top - 80);
+    c->trap_frame->r10 = *(u64 *)(p_top - 88);
+    c->trap_frame->r11 = *(u64 *)(p_top - 96);
+    c->trap_frame->r12 = *(u64 *)(p_top - 104);
+    c->trap_frame->r13 = *(u64 *)(p_top - 112);
+    c->trap_frame->r14 = *(u64 *)(p_top - 120);
+    c->trap_frame->r15 = *(u64 *)(p_top - 128);
 
     spin_unlock_irq(&task_lock, flags);
     return c;

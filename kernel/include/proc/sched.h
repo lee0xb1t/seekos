@@ -31,7 +31,7 @@ void sched_test_init();
 #endif
 
 void sched_add(task_t *);
-void sched_execve(const char *path, int argc, char **argv, char *cwd, int envc, char **envp);
+i32 sched_execve(const char *path, int argc, char **argv, char *cwd, int envc, char **envp);
 void sched_exit(i32 exitcode);
 i32 sched_get_errno();
 void sched_set_errno(i32);
