@@ -22,6 +22,10 @@
 #define VFS_STDOUT                  1
 #define VFS_STDERR                  2
 
+#define VFS_NODE_IS_DEVICE(i_type)  ((i_type) == VFS_NODE_CHARACTER || (i_type) == VFS_NODE_BLOCK)
+#define VFS_NODE_IS_DIR(i_type)     ((i_type) == VFS_NODE_DIRECTOR || (i_type) == VFS_NODE_ROOT \
+                                     || (i_type) == VFS_NODE_MOUNTPOINT)
+
 
 typedef struct _task_t task_t;
 
@@ -169,6 +173,8 @@ i32 vfs_lseek(vfs_handle_t, i32 offset , i32 wence);
 i32 vfs_get_full_path(vfs_handle_t, i32 len, char *buff);
 
 i32 vfs_iterate(vfs_handle_t, i32 *filecnt, vfs_dirent_t **dirent);
+
+vfs_inode_type_t vfs_get_inode_type(vfs_handle_t fh);
 
 vfs_handle_t vfs_open_console(char *path, vfs_handle_t fh);
 i32 vfs_close_console(vfs_handle_t fh);

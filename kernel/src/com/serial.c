@@ -36,3 +36,11 @@ void serial_write(u8 data) {
     }
     port_outb(COM1_BASE, data);
 }
+
+void serial_write_str(const char *s) {
+    while (*s) {
+        if (*s == '\n')
+            serial_write('\r');
+        serial_write(*s++);
+    }
+}

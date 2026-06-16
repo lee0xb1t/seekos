@@ -7,13 +7,12 @@
 _start:
     popq %rdi
     popq %rsi
+    popq %rdx
     call main
 
-    // exit
     movq %rax, %rdi
     movq $1, %rax
     syscall
 
-    // noreturn
     hlt
     jmp .

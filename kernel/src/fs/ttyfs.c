@@ -61,7 +61,7 @@ vfs_super_block_t *ttyfs_mksb(vfs_fs_t *fs) {
     inode->i_mountpoint = null;
     inode->i_ops = &ttyfs_inode_ops;
     inode->i_sb = sb;
-    inode->i_type = VFS_NODE_DIRECTOR;
+    inode->i_type = VFS_NODE_CHARACTER;
     inode->i_pdata = null;
     inode->i_fops = &ttyfs_file_ops;
     dentry->d_inode = inode;
@@ -133,6 +133,9 @@ i32 ttyfs_read(vfs_inode_t *this, vfs_file_t *filep, i32 len, char *buffer) {
         if (!kb_data.key_pressed)
             continue;
 
+        if (ch == '\0')
+            continue;
+
         _tty_echo_char(ch);
 
         if (ch == '\n')
@@ -141,13 +144,20 @@ i32 ttyfs_read(vfs_inode_t *this, vfs_file_t *filep, i32 len, char *buffer) {
 
 _done:
     i32 actual_len = (i32)min((u32)len, (u32)tty_buf.isize);
-    memcpy(buffer, tty_buf.ibuff + tty_buf.ibegin, actual_len);
+
+    u64 avail_to_end = TTY_BUFFER_SIZE - tty_buf.ibegin;
+    if ((u64)actual_len <= avail_to_end) {
+        memcpy(buffer, tty_buf.ibuff + tty_buf.ibegin, actual_len);
+    } else {
+        memcpy(buffer, tty_buf.ibuff + tty_buf.ibegin, avail_to_end);
+        memcpy(buffer + avail_to_end, tty_buf.ibuff, (u64)actual_len - avail_to_end);
+    }
 
     tty_buf.isize = 0;
     tty_buf.ibegin = tty_buf.icursor;
 
     spin_unlock_irq(&tty_lock, flags);
-    return 0;
+    return actual_len;
 }
 
 

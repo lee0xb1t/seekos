@@ -158,10 +158,16 @@ typedef struct _task_t{
 
     void *old_kstack_ptr;
     // void *old_mm;
+
+    int u_envc;
+    char *u_envp;
 } task_t;
 
 #define task_argv(task, idx)  \
     &(task)->u_argv[(idx) * TASK_MAX_ARGV_LEN]
+
+#define task_envp(task, idx)  \
+    &(task)->u_envp[(idx) * TASK_MAX_ARGV_LEN]
 
 
 void task_init();
@@ -177,6 +183,7 @@ void task_setup_ustack(task_t *, void *ustack, u32 size);
 void task_setup_routine(task_t *, task_routine_t task_routine);
 void task_setup_path(task_t *, const char *path);
 void task_setup_argv(task_t *, int argc, char **argv);
+void task_setup_env(task_t *, int envc, char **envp);
 void task_setup_cwd(task_t *, char *cwd);
 
 task_t *task_fork(task_t *p);

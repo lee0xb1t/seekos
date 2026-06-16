@@ -4,6 +4,7 @@
 #include <lib/kstring.h>
 #include <lib/kmemory.h>
 #include <lib/kmath.h>
+#include <lib/errno.h>
 #include <log/klog.h>
 #include <mm/mm.h>
 #include <mm/kmalloc.h>
@@ -241,7 +242,7 @@ vfs_handle_t vfs_open(char *path, vfs_openmode_t openmode) {
     vfs_dentry_t *dentry = vfs_resolve_path(path, R_NO_CREATE);
     if (dentry == null) {
         spin_unlock(&vfs_lock);
-        return VFS_INVALID_HANDLE;
+        return -ENOENT;
     }
 
     if (!dentry->d_inode) {
@@ -253,7 +254,6 @@ vfs_handle_t vfs_open(char *path, vfs_openmode_t openmode) {
         dentry = dentry->d_inode->i_mountpoint->s_root;
     }
 
-    // create description and handle
     vfs_handle_t fh = ++vfs_next_handle_count;
     
     vfs_file_t *fd = kzalloc(sizeof(vfs_file_t));
@@ -383,8 +383,7 @@ i32 vfs_lseek(vfs_handle_t fh, i32 offset , i32 wence) {
         fd = null;
     }
 
-    if (fd && fd->f_ops) {
-        //r = fd->f_ops->lseek(fd->f_inode, fd, offset, wence);
+    if (fd && fd->f_ops && fd->f_ops->lseek) {
         spin_unlock(&vfs_lock);
         r = fd->f_ops->lseek(fd->f_inode, fd, offset, wence);
         spin_lock(&vfs_lock);
@@ -452,6 +451,30 @@ i32 vfs_get_full_path(vfs_handle_t fh, i32 len, char *buff) {
     return r;
 }
 
+vfs_inode_type_t vfs_get_inode_type(vfs_handle_t fh) {
+    vfs_inode_type_t type = VFS_NODE_INVALID;
+
+    spin_lock(&vfs_lock);
+
+    vfs_file_t *fd = null;
+
+    task_t *t = sched_get_task();
+    dlist_foreach(&t->open_files, entry) {
+        fd = dlist_container_of(entry, vfs_file_t, open_list_entry);
+        if (fd->f_handle == fh) {
+            break;
+        }
+        fd = null;
+    }
+
+    if (fd && fd->f_inode) {
+        type = fd->f_inode->i_type;
+    }
+
+    spin_unlock(&vfs_lock);
+    return type;
+}
+
 i32 vfs_iterate(vfs_handle_t fh, i32 *filecnt, vfs_dirent_t **dirent) {
     i32 r = -1;
 
@@ -468,8 +491,8 @@ i32 vfs_iterate(vfs_handle_t fh, i32 *filecnt, vfs_dirent_t **dirent) {
         fd = null;
     }
 
-    if (fd && fd->f_ops) {
-        //r = fd->f_ops->iterate(fd->f_inode, fd, null, filecnt, dirent);
+    if (fd && fd->f_ops && fd->f_ops->iterate
+        && fd->f_inode && VFS_NODE_IS_DIR(fd->f_inode->i_type)) {
         spin_unlock(&vfs_lock);
         r = fd->f_ops->iterate(fd->f_inode, fd, null, filecnt, dirent);
         spin_lock(&vfs_lock);
@@ -486,7 +509,7 @@ vfs_handle_t vfs_open_console(char *path, vfs_handle_t fh) {
     vfs_dentry_t *dentry = vfs_resolve_path(path, R_NO_CREATE);
     if (dentry == null) {
         spin_unlock(&vfs_lock);
-        return VFS_INVALID_HANDLE;
+        return -ENOENT;
     }
 
     if (!dentry->d_inode) {

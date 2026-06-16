@@ -9,5 +9,6 @@ bool serial_init();
 
 u8 serial_read();
 void serial_write(u8 data);
+void serial_write_str(const char *s);
 
 #endif //__serial_h__

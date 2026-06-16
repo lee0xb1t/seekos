@@ -313,7 +313,8 @@ void kernel_main() {
     //...
     smp_init();
 
-    sched_execve("/bin/shell", 0, null, "/root");
+    char *init_envp[] = {"PATH=/bin", null};
+    sched_execve("/bin/shell", 0, null, "/", 1, init_envp);
 
     isr_enable_interrupts();
 

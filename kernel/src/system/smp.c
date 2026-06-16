@@ -39,7 +39,7 @@ void smp_init() {
     memset(ap_entry, 0, PAGE_SIZE);
     memcpy(ap_entry, _binary_ap_trampoline_bin_start, (size_t)_binary_ap_trampoline_bin_size);
 
-    void *ap_stack = vmalloc(null, null, PAGE_SIZE, VMM_FLAGS_DEFAULT);
+    void *ap_stack = vmalloc(null, null, TASK_STACK_SIZE_32KB, VMM_FLAGS_DEFAULT);
     u64 ap_stack_bottom = (u64)ap_stack + PAGE_SIZE;
 
     cpu_ctrl_t *ap_ctrl = cpu_init(atomic_get(&ap_count));
@@ -79,6 +79,12 @@ void smp_init() {
 void smp_ap_entry(cpu_ctrl_t *cpu_ctrl) {
     klogi("!!!smp_ap_entry!!!\n");
 
+    asm volatile("xorq %%rax, %%rax; "
+                 "movq %%rax, %%dr0; movq %%rax, %%dr1; "
+                 "movq %%rax, %%dr2; movq %%rax, %%dr3; "
+                 "movq %%rax, %%dr6; movq %%rax, %%dr7"
+                 : : : "rax");
+
     cpu_feature_init();
 
     cpu_gs_init(cpu_ctrl);
@@ -87,11 +93,10 @@ void smp_ap_entry(cpu_ctrl_t *cpu_ctrl) {
     apic_load();
 
     syscall_init();
-
-    sched_init();
     
     atomic_inc(&ap_count);
 
-    asm volatile("sti");
-    __hang();
+    for (;;) {
+        asm volatile("hlt");
+    }
 }

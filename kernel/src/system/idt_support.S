@@ -35,7 +35,18 @@ exc_divide_error:         // Interrupt 0
     EXCEPTION_HANDLER 0, 0, exc_common_handler
 
 exc_debug:                // Interrupt 1
-    EXCEPTION_HANDLER 0, 1, exc_common_handler
+    cli
+    pushq   %rax
+    xorq    %rax, %rax
+    movq    %rax, %dr7
+    movq    %rax, %dr6
+    movq    %rax, %dr0
+    movq    %rax, %dr1
+    movq    %rax, %dr2
+    movq    %rax, %dr3
+    btrq    $8, 8(%rsp)
+    popq    %rax
+    iretq
 
 exc_nmi:                  // Interrupt 2
     EXCEPTION_HANDLER 0, 2, exc_common_handler

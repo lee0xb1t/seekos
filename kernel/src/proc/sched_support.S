@@ -9,6 +9,7 @@
 
 
 __switch_to:
+    cli
     testq %rcx, %rcx
     jnz .skip_save_gr
     save_gr

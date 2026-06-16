@@ -183,16 +183,18 @@ vm_area_t *mm_get_vm_area(linked_list_t *vmlist, void *ptr) {
 
 mm_struct_t *mm_copy(mm_struct_t *p) {
     mm_struct_t *n = mm_create();
-    
+    if (!n) return null;
+
     spin_lock(&p->vm_area_lock);
-    // vm_area = mm_find_vm_area(&mm->vm_area_head, ptr, size, flags);
     dlist_foreach(&p->vm_area_head, entry) {
         vm_area_t *vmarea = dlist_container_of(entry, vm_area_t, list_entry);
         size_t sz = vmarea->vm_end - vmarea->vm_start;
         void *temp_ptr = kzalloc(sz);
+        if (!temp_ptr) continue;
         memcpy(temp_ptr, (void *)vmarea->vm_start, sz);
         void *ptr = vmalloc(n, (void *)vmarea->vm_start, sz, vmarea->vm_flags);
-        mm_write(n, ptr, temp_ptr, sz);
+        if (ptr)
+            mm_write(n, ptr, temp_ptr, sz);
         kfree(temp_ptr);
     }
     spin_unlock(&p->vm_area_lock);

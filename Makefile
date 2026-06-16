@@ -129,6 +129,15 @@ else
 endif
 
 
+.PHONY: gdb
+gdb: clean kernel_debug initrd limine $(HDD_IAMGE) user
+ifeq ($(ARCH),x86_64)
+	qemu-system-$(ARCH) $(QEMU_FLAGS) $(QEMU_CPU_EMU) $(QEMU_AUDIO) $(QEMU_MEM) $(QEMU_DISK) -gdb tcp::1234 -S
+else
+	echo "Unknown Arch"
+endif
+
+
 .PHONY: release 
 release: clean kernel_release initrd limine $(HDD_IAMGE)
 ifeq ($(ARCH),x86_64)

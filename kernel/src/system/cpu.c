@@ -39,6 +39,12 @@ cpu_ctrl_t *cpu_init(int cpuno) {
     cpu_ctrls[cpuno]->self = &cpu_ctrls[cpuno]->self;
     cpu_ctrls[cpuno]->id = cpuno;
 
+    asm volatile("xorq %%rax, %%rax; "
+                 "movq %%rax, %%dr0; movq %%rax, %%dr1; "
+                 "movq %%rax, %%dr2; movq %%rax, %%dr3; "
+                 "movq %%rax, %%dr6; movq %%rax, %%dr7"
+                 : : : "rax");
+
     return cpu_ctrls[cpuno];
 }
 

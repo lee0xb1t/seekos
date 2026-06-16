@@ -20,9 +20,10 @@ extern void __sched_task_start_user(void);
 
 static task_id_t _alloc_tid(void) {
     task_id_t id;
-    spin_lock(&global_id_lock);
+    u64 flags;
+    spin_lock_irq(&global_id_lock, flags);
     id = ++global_id;
-    spin_unlock(&global_id_lock);
+    spin_unlock_irq(&global_id_lock, flags);
     return id;
 }
 
@@ -137,7 +138,7 @@ static void _task_close_all_files(task_t *t) {
 void task_free(task_t *t) {
     task_free_phase0(t);
     if (t->kstack_ptr)
-        kfree(t->kstack_ptr);
+        vfree(null, t->kstack_ptr);
     mm_free(t->mm);
     kfree(t);
 }
@@ -149,6 +150,11 @@ void task_free_phase0(task_t *t) {
     if (t->u_argv) {
         kfree(t->u_argv);
         t->u_argv = null;
+    }
+
+    if (t->u_envp) {
+        kfree(t->u_envp);
+        t->u_envp = null;
     }
 
     _task_close_all_files(t);
@@ -199,6 +205,19 @@ void task_setup_cwd(task_t *t, char *cwd) {
     t->cwd[len] = '\0';
 }
 
+void task_setup_env(task_t *t, int envc, char **envp) {
+    if (envc <= 0) return;
+    t->u_envc = envc;
+    t->u_envp = (char *)kzalloc(envc * TASK_MAX_ARGV_LEN);
+    for (int i = 0; i < envc; i++) {
+        char *dst = task_envp(t, i);
+        size_t len = strlen(envp[i]);
+        if (len >= TASK_MAX_ARGV_LEN) len = TASK_MAX_ARGV_LEN - 1;
+        memcpy(dst, envp[i], len);
+        dst[len] = '\0';
+    }
+}
+
 
 task_t *task_fork(task_t *p) {
     u64 flags;
@@ -208,10 +227,19 @@ task_t *task_fork(task_t *p) {
         panic("cannot fork kernel task");
 
     task_t *c = kzalloc(sizeof(task_t));
+    if (!c) {
+        spin_unlock_irq(&task_lock, flags);
+        return null;
+    }
     memcpy(c, p, sizeof(task_t));
 
     c->tgid = c->tid = _alloc_tid();
     c->mm = mm_copy(p->mm);
+    if (!c->mm) {
+        kfree(c);
+        spin_unlock_irq(&task_lock, flags);
+        return null;
+    }
 
     dlist_init(&c->open_files);
 
@@ -220,6 +248,19 @@ task_t *task_fork(task_t *p) {
         c->u_argv = (char *)kzalloc(p->u_argc * TASK_MAX_ARGV_LEN);
         memcpy(c->u_argv, p->u_argv, p->u_argc * TASK_MAX_ARGV_LEN);
     }
+
+    if (p->u_envc > 0 && p->u_envp) {
+        c->u_envc = p->u_envc;
+        c->u_envp = (char *)kzalloc(p->u_envc * TASK_MAX_ARGV_LEN);
+        memcpy(c->u_envp, p->u_envp, p->u_envc * TASK_MAX_ARGV_LEN);
+    }
+
+    c->rstack = null;
+    c->rlimit = null;
+    c->rstack_ptr = null;
+    c->old_kstack_ptr = null;
+    dlist_init(&c->list);
+    dlist_init(&c->child_list);
 
     c->state = TASK_READY;
     c->wakeup_event = (kevent_t *)kzalloc(sizeof(kevent_t));
@@ -249,6 +290,11 @@ task_t *task_replace(task_t *t, const char *name) {
         t->u_argv = null;
     }
 
+    if (t->u_envp) {
+        kfree(t->u_envp);
+        t->u_envp = null;
+    }
+
     t->mm = mm_replace(t->mm);
     t->state = TASK_READY;
 
@@ -268,13 +314,24 @@ task_t *task_replace(task_t *t, const char *name) {
 
 void task_init_ustack(task_t *t) {
     int argc = t->u_argc + 1;
+    int envc = t->u_envc;
     u8 *sp = (u8 *)t->ustack;
 
     sp -= argc * TASK_MAX_ARGV_LEN;
     u8 *argv_area = sp;
 
+    sp -= envc * TASK_MAX_ARGV_LEN;
+    u8 *envp_area = sp;
+
     sp -= argc * sizeof(uptr);
     uptr *argv_ptr = (uptr *)sp;
+
+    sp -= (envc + 1) * sizeof(uptr);
+    uptr *envp_ptr = (uptr *)sp;
+    envp_ptr[envc] = 0;
+
+    sp -= sizeof(uptr);
+    uptr *envpp = (uptr *)sp;
 
     sp -= sizeof(uptr);
     uptr *argvp = (uptr *)sp;
@@ -292,6 +349,14 @@ void task_init_ustack(task_t *t) {
         argv_ptr[i] = (uptr)dst;
     }
 
+    for (int i = 0; i < envc; i++) {
+        char *src = task_envp(t, i);
+        u8 *dst = envp_area + i * TASK_MAX_ARGV_LEN;
+        memcpy(dst, src, TASK_MAX_ARGV_LEN);
+        envp_ptr[i] = (uptr)dst;
+    }
+
+    *envpp = (uptr)envp_ptr;
     *argvp = (uptr)argv_ptr;
     *argcp = (uptr)argc;
 

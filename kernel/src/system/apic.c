@@ -151,10 +151,8 @@ void apic_send_eoi() {
 void _apic_enable() {
     uptr svr_value = apic_reg_read(APIC_SVR);
 
-    // 低8位位映射到的irq向量号
-    svr_value |= 0xffff;
-    
-    // 启用APIC
+    svr_value = (svr_value & ~0xff) | 0xff;
+
     svr_value |= (1ul << 8);
 
     u32 version = apic_reg_read(APIC_VER_REG);

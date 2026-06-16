@@ -57,15 +57,12 @@ void syscall_init() {
 
 i32 sys_debug_log() {
     klogi("This is test debug log while syscall.\n");
+    return 0;
 }
 
 i32 sys_user_exit(i32 exitcode) {
     sched_exit(exitcode);
 }
-
-#define O_READ          0
-#define O_WRITE         1
-#define O_READWRITE     0
 
 i32 sys_open(const char *path, int mode) {
     int pathlen = min(strlen(path), VFS_MAX_PATH_LENGTH);
@@ -110,30 +107,33 @@ void sys_vfree(void *ptr) {
 
 struct dirent {
     char name[256];
-#define DIRENT_DIRECTORY        0
-#define DIRENT_FILE             1
     int type;
     u32 sz;
 };
+
+#define DIRENT_DIRECTORY    0
+#define DIRENT_FILE         1
 
 i32 sys_readdir(i32 h, void *data, int sz) {
     int filecnt = 0;
     vfs_dirent_t *dirent = null;
 
-    if (sz < filecnt * sizeof(vfs_dirent_t)) {
-        return -ENOBUFS;
-    }
-
     vfs_iterate(h, &filecnt, &dirent);
 
-    if (dirent == null) {
+    if (!dirent)
+        return -ENOBUFS;
+
+    if (sz < (int)(filecnt * sizeof(struct dirent))) {
+        kfree(dirent);
         return -ENOBUFS;
     }
 
     struct dirent *dp = (struct dirent *)data;
 
     for (int i = 0; i < filecnt; i++) {
-        memcpy(dp[i].name, dirent[i].name, strlen(dirent[i].name));
+        size_t nlen = min(strlen(dirent[i].name), sizeof(dp[i].name) - 1);
+        memcpy(dp[i].name, dirent[i].name, nlen);
+        dp[i].name[nlen] = '\0';
         dp[i].sz = dirent[i].sz;
         if (dirent[i].sz == VFS_NODE_FILE) {
             dp[i].type = DIRENT_FILE;
@@ -143,7 +143,6 @@ i32 sys_readdir(i32 h, void *data, int sz) {
     }
 
     kfree(dirent);
-
     return filecnt;
 }
 
@@ -157,7 +156,7 @@ i32 sys_sleep(i32 millis) {
 }
 
 void sys_execve(const char *path, int argc, char **argv) {
-    sched_execve(path, argc, argv, null);
+    sched_execve(path, argc, argv, null, 0, null);
 }
 
 i32 sys_wait(u32 id) {
@@ -166,14 +165,23 @@ i32 sys_wait(u32 id) {
 
 void sys_getcwd(char *buf, size_t len) {
     task_t *t = sched_get_task();
-    memcpy(buf, t->cwd, min(strlen(t->cwd), len));
+    size_t clen = strlen(t->cwd);
+    if (clen >= len) clen = len - 1;
+    memcpy(buf, t->cwd, clen);
+    buf[clen] = '\0';
 }
 
 i32 sys_chdir(char *path) {
     i32 r = -1;
     vfs_handle_t fh = vfs_open(path, VFS_MODE_READ);
-    if (fh == VFS_INVALID_HANDLE)
+    if (fh < 0)
+        return fh;
+
+    vfs_inode_type_t itype = vfs_get_inode_type(fh);
+    if (!VFS_NODE_IS_DIR(itype)) {
+        vfs_close(fh);
         return -1;
+    }
 
     char full_path[VFS_MAX_PATH_LENGTH] = {0};
     r = vfs_get_full_path(fh, VFS_MAX_PATH_LENGTH, full_path);
@@ -182,8 +190,10 @@ i32 sys_chdir(char *path) {
         return -1;
     }
     task_t *t = sched_get_task();
-    memset(t->cwd, 0, VFS_MAX_PATH_LENGTH);
-    memcpy(t->cwd, full_path, strlen(full_path));
+    size_t plen = strlen(full_path);
+    if (plen >= sizeof(t->cwd)) plen = sizeof(t->cwd) - 1;
+    memset(t->cwd, 0, sizeof(t->cwd));
+    memcpy(t->cwd, full_path, plen);
     vfs_close(fh);
     return 0;
 }

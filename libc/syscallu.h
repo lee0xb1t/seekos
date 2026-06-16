@@ -66,7 +66,7 @@
         asm volatile(       \
             "syscall;"       \
             : "=a"(ret)  \
-            : "a"(index), "D"(arg1), "S"(arg2), "d"(arg3), "c"(arg4), "r8"(arg5) "r9"(arg6)    \
+            : "a"(index), "D"(arg1), "S"(arg2), "d"(arg3), "c"(arg4), "r8"(arg5), "r9"(arg6)    \
             : "rcx", "r11", "memory"    \
         );          \
     } while(0)

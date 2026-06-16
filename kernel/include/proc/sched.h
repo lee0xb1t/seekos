@@ -31,7 +31,7 @@ void sched_test_init();
 #endif
 
 void sched_add(task_t *);
-void sched_execve(const char *path, int argc, char **argv, char *cwd);
+void sched_execve(const char *path, int argc, char **argv, char *cwd, int envc, char **envp);
 void sched_exit(i32 exitcode);
 i32 sched_get_errno();
 void sched_set_errno(i32);
@@ -40,5 +40,7 @@ void sched_sleep(u64 millis);
 u32 sched_fork();
 i32 sched_wait(u32);
 u32 sched_spawn(const char *path, int argc, char **argv);
+
+extern void __idle_proc(void *cpudata);
 
 #endif

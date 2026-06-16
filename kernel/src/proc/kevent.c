@@ -33,6 +33,7 @@ kevent_data_t kevent_subscribe(kevent_type_t type) {
     u64 flags;
 
     kevent_t *event = kzalloc(sizeof(kevent_t));
+    if (!event) return EV_DATA_NULL;
     task_id_t tid = sched_get_tid();
     event->publisher = TASK_ID_EMPTY;
     event->subscriber = tid;
@@ -56,6 +57,7 @@ void kevent_publish(kevent_type_t type, kevent_data_t data) {
     u64 flags;
 
     kevent_t *event = kzalloc(sizeof(kevent_t));
+    if (!event) return;
     task_id_t tid = sched_get_tid();
     event->publisher = tid;
     event->subscriber = TASK_ID_EMPTY;

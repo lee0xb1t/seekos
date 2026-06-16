@@ -33,9 +33,10 @@ void kfree(void *ptr) {
 }
 
 void *kzalloc(size_t size_of_bytes) {
-    void *ptr = kmalloc(size_of_bytes);
-    memset(ptr, 0, size_of_bytes);
-    return ptr;
+	void *ptr = kmalloc(size_of_bytes);
+	if (ptr)
+		memset(ptr, 0, size_of_bytes);
+	return ptr;
 }
 
 void *krealloc(void *ptr, size_t old_size, size_t new_size) {

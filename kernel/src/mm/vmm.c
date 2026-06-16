@@ -172,6 +172,7 @@ void slab_cache_growth(slab_cache_t *cache) {
     u32 obj_count = 0;
 
     slab_t *growth_slab = slab_create(cache->nr_pages, cache->obj_size, &obj_count);
+    if (!growth_slab) return;
     dlist_add_next(&cache->slabs.slab_list, &growth_slab->slab_list);
 
     cache->free_objects += obj_count;
@@ -247,27 +248,30 @@ slab_cache_t *slab_cache_create_cache(char *name, u32 obj_size, u32 nr_pages) {
 }
 
 void *slab_alloc(size_t size) {
-    spin_lock(&slab_lock);
+    u64 flags;
+    spin_lock_irq(&slab_lock, flags);
 
     dlist_foreach(&cache_cache_head, entry) {
         slab_cache_t *cache_entry = dlist_container_of(entry, slab_cache_t, list);
 
         if (size <= cache_entry->obj_size) {
-            spin_unlock(&slab_lock);
-            return slab_cache_alloc(cache_entry, size);
+            void *ptr = slab_cache_alloc(cache_entry, size);
+            spin_unlock_irq(&slab_lock, flags);
+            return ptr;
         }
     }
 
-    spin_unlock(&slab_lock);
+    spin_unlock_irq(&slab_lock, flags);
 
     return null;
 }
 
 void slab_free(void *ptr, bool *is_slab) {
+    u64 flags;
     if (is_slab)
          *is_slab = false;
 
-    spin_lock(&slab_lock);
+    spin_lock_irq(&slab_lock, flags);
 
     dlist_foreach(&cache_cache_head, entry) {
         slab_cache_t *cache_entry = dlist_container_of(entry, slab_cache_t, list);
@@ -279,17 +283,18 @@ void slab_free(void *ptr, bool *is_slab) {
         }
     }
 
-    spin_unlock(&slab_lock);
+    spin_unlock_irq(&slab_lock, flags);
 }
 
 void vmm_dump_slab() {
+    u64 flags;
     klog_debug("name  obj_size  free_objects  total_objects  nr_pages  total_pages\n");
-    spin_lock(&slab_lock);
+    spin_lock_irq(&slab_lock, flags);
     dlist_foreach(&cache_cache_head, entry) {
         slab_cache_t *cache_entry = dlist_container_of(entry, slab_cache_t, list);
         klog_debug("%s\t%d\t%d\t%d\t%d\t%d\n", cache_entry->name, cache_entry->obj_size, cache_entry->free_objects, cache_entry->total_objects, cache_entry->nr_pages, cache_entry->total_pages);
     }
-    spin_unlock(&slab_lock);
+    spin_unlock_irq(&slab_lock, flags);
 }
 
 

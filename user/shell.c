@@ -6,154 +6,212 @@
 
 #define MAX_ARGS    16
 
-struct builtin_cmd_parse {
-    char *cmd;
+struct cmd_parse {
+    char *raw;
     char *args[MAX_ARGS];
-    int cnt;
+    int   cnt;
 };
 
-typedef void (*builtin_callback)(struct builtin_cmd_parse *);
+typedef void (*builtin_fn)(struct cmd_parse *);
 
-struct builtin_cmd {
-    char *cmd;
-    builtin_callback callback;
+struct builtin {
+    char      *name;
+    builtin_fn fn;
 };
-
 
 static char cwd[256];
-static char cmd[256];
+static char input_buf[256];
+static char path_env[256] = "/bin";
 
 
+static void env_parse(char **envp) {
+    if (!envp) return;
+    for (char **e = envp; *e; e++) {
+        if (!strncmp(*e, "PATH=", 5)) {
+            size_t len = strlen(*e + 5);
+            if (len >= sizeof(path_env)) len = sizeof(path_env) - 1;
+            memcpy(path_env, *e + 5, len);
+            path_env[len] = '\0';
+            break;
+        }
+    }
+}
 
-char *get_cwd() {
-    memset(cwd, 0, 256);
+
+static const char *get_path(void) {
+    return path_env;
+}
+
+
+static void resolve_path(const char *cmd, char *out, size_t outsz) {
+    if (strchr(cmd, '/')) {
+        memcpy(out, cmd, strlen(cmd) + 1);
+        return;
+    }
+
+    const char *path = get_path();
+    const char *p = path;
+    while (*p) {
+        const char *end = strchr(p, ':');
+        if (!end) end = p + strlen(p);
+
+        size_t dirlen = (size_t)(end - p);
+        if (dirlen + strlen(cmd) + 2 > outsz) goto next;
+
+        memcpy(out, p, dirlen);
+        out[dirlen] = '/';
+        memcpy(out + dirlen + 1, cmd, strlen(cmd) + 1);
+
+        FILE *fh = open(out, O_READ);
+        if (fh) {
+            close(fh);
+            return;
+        }
+
+next:
+        p = *end ? end + 1 : end;
+    }
+
+    snprintf(out, outsz, "/bin/%s", cmd);
+}
+
+
+static char *get_cwd(void) {
+    memset(cwd, 0, sizeof(cwd));
     sys_getcwd(cwd, sizeof(cwd));
     return cwd;
 }
 
-void print_cwd(struct builtin_cmd_parse *parse) {
+
+static void builtin_pwd(struct cmd_parse *p) {
+    (void)p;
     printf("%s\n", cwd);
 }
 
-void list_dir(struct builtin_cmd_parse *parse) {
-    DIR* dirp = opendir(cwd);
-    struct dirent *dp = readdir(dirp);
-    for (int i = 0; i < dirp->cnt; i++) {
-        printf("%s\t", dp[i].name);
-    }
-    printf("\n");
-    closedir(dirp);
-}
-
-void change_dir(struct builtin_cmd_parse *parse) {
-    // cd
-    if (parse->cnt < 2) {
-        return;
-    }
-
-    // char *temp = cmd;
-
-    // for (int i = 0; i < strlen(cmd); i++) {
-    //     if (temp[i] == ' ') {
-    //         temp = (char*)&temp[i];
-    //     }
-    // }
-    sys_chdir(parse->args[1]);
+static void builtin_cd(struct cmd_parse *p) {
+    if (p->cnt < 2) return;
+    sys_chdir(p->args[1]);
     get_cwd();
 }
 
-void parse_cmd(const char *s, struct builtin_cmd_parse *parse) {
-    parse->cmd = sys_vmalloc(null, strlen(s)+1);
-    memset(parse->cmd, 0, strlen(s)+1);
-    memcpy(parse->cmd, s, strlen(s));
+static void builtin_ls(struct cmd_parse *p) {
+    (void)p;
+    DIR *dp = opendir(cwd);
+    if (!dp) {
+        dprintf(STDERR, "ls: cannot open '%s'\n", cwd);
+        return;
+    }
+    struct dirent *entries = readdir(dp);
+    for (int i = 0; i < dp->cnt; i++)
+        printf("%s  ", entries[i].name);
+    printf("\n");
+    closedir(dp);
+}
 
-    char *prev = parse->cmd;
+static void builtin_help(struct cmd_parse *p) {
+    (void)p;
+    printf("builtins: cd  ls  pwd  help\n");
+}
 
-    int len = strlen(s)+1;
-    for (int i = 0; i < len; i++) {
-        if (parse->cmd[i] == ' ' || parse->cmd[i] == '\0') {
-            parse->cmd[i] = '\0';
+static void builtin_echo(struct cmd_parse *p) {
+    for (int i = 1; i < p->cnt; i++)
+        printf("%s ", p->args[i]);
+    printf("\n");
+}
 
-            if (strlen(prev) > 0) {
-                parse->args[parse->cnt] = sys_vmalloc(null, strlen(prev)+1);
-                memset(parse->args[parse->cnt], 0, strlen(prev)+1);
-                memcpy(parse->args[parse->cnt], prev, strlen(prev));
 
-                prev = &parse->cmd[i+1];
-                
-                parse->cnt++;
+static void parse_free(struct cmd_parse *p) {
+    sys_vfree(p->raw);
+    for (int i = 0; i < p->cnt; i++)
+        sys_vfree(p->args[i]);
+    memset(p, 0, sizeof(*p));
+}
 
-                if (parse->cnt >= MAX_ARGS) {
-                    break;
-                }
+static void parse_cmd(const char *s, struct cmd_parse *p) {
+    memset(p, 0, sizeof(*p));
+
+    size_t slen = strlen(s);
+    if (!slen) return;
+
+    p->raw = sys_vmalloc(null, slen + 1);
+    memset(p->raw, 0, slen + 1);
+    memcpy(p->raw, s, slen);
+
+    size_t end = slen + 1;
+    char  *tok = p->raw;
+
+    for (size_t i = 0; i < end; i++) {
+        if (p->raw[i] == ' ' || p->raw[i] == '\0') {
+            p->raw[i] = '\0';
+            size_t tlen = strlen(tok);
+            if (tlen > 0) {
+                p->args[p->cnt] = sys_vmalloc(null, tlen + 1);
+                memset(p->args[p->cnt], 0, tlen + 1);
+                memcpy(p->args[p->cnt], tok, tlen);
+                p->cnt++;
+                if (p->cnt >= MAX_ARGS) break;
             }
+            tok = &p->raw[i + 1];
         }
     }
 }
 
-void free_parse(struct builtin_cmd_parse *parse) {
-    sys_vfree(parse->cmd);
-    for (int i = 0; i < parse->cnt; i++) {
-        sys_vfree(parse->args[i]);
-        parse->args[i] = null;
-    }
-    parse->cmd = null;
-    parse->cnt = 0;
-}
 
-char *read_cmd() {
-    memset(cmd, 0, 256);
-    scanf("%s", cmd);
-    return cmd;
+static char *read_line(void) {
+    memset(input_buf, 0, sizeof(input_buf));
+    scanf("%s", input_buf);
+    return input_buf;
 }
 
 
-static struct builtin_cmd cmds[] = {
-    {"ls", list_dir},
-    {"cd", change_dir},
-    {"pwd", print_cwd},
+static const struct builtin builtins[] = {
+    {"cd",   builtin_cd},
+    {"ls",   builtin_ls},
+    {"pwd",  builtin_pwd},
+    {"help", builtin_help},
+    {"echo", builtin_echo},
 };
 
-builtin_callback is_builtin(const char *cmd) {
-    int cnt = sizeof(cmds) / sizeof(struct builtin_cmd);
-    for (int i = 0; i < cnt; i++) {
-        if (strcmp(cmds[i].cmd, cmd) == 0) {
-            return cmds[i].callback;
-        }
-    }
+static builtin_fn find_builtin(const char *name) {
+    size_t n = sizeof(builtins) / sizeof(builtins[0]);
+    for (size_t i = 0; i < n; i++)
+        if (strcmp(builtins[i].name, name) == 0)
+            return builtins[i].fn;
     return null;
 }
 
-int main(int argc, char **argv) {
-    builtin_callback builtin_cb;
 
-    while (true) {
+int main(int argc, char **argv, char **envp) {
+    (void)argc; (void)argv;
+    env_parse(envp);
+    struct cmd_parse parse;
+
+    while (1) {
         printf("%s$: ", get_cwd());
 
-        char *cmd = read_cmd();
+        char *line = read_line();
+        if (!strlen(line)) continue;
 
-        struct builtin_cmd_parse parse;
+        parse_cmd(line, &parse);
+        if (!parse.cnt) continue;
+        printf(line);
 
-        if (strlen(cmd)>0) {
-            parse_cmd(cmd, &parse);
-            if (builtin_cb = is_builtin(parse.args[0])) {
-                builtin_cb(&parse);
-            } else {
-                // printf("%s\n", parse.args[0]);
-                int pid = sys_spawn(parse.args[0], parse.cnt, parse.args);
-                // sys_wait(pid);
-                //printf("command not found\n");
-            }
-            free_parse(&parse);
-        }
+        // builtin_fn fn = find_builtin(parse.args[0]);
+        // if (fn) {
+        //     fn(&parse);
+        // } else {
+        //     char path[256];
+        //     resolve_path(parse.args[0], path, sizeof(path));
 
-        // int pid = sys_fork();
-        // if (pid == 0) {
-        //     printf("I am child!\n");
-        //     sys_execve("/bin/test1", null, null);
+        //     u32 pid = sys_fork();
+        //     if (pid == 0) {
+        //         printf("%s\n", path);
+        //         sys_execve(path, parse.cnt, parse.args);
+        //     } else {
+        //         sys_wait(pid);
+        //     }
         // }
 
-        // printf("I am parent!\n");
-        // sys_wait(pid);
+        parse_free(&parse);
     }
 }

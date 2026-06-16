@@ -6,439 +6,211 @@
 #include <libc/types.h>
 
 
-#define KPRINT_MAX_BUFFER_SIZE      4096
+#define PRINT_BUF_SIZE  4096
 
-/* Ascii Table */
-char print_at[2][16] = {
-    { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f' },
-    { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F' },
-};
+static const char hex_lower[] = "0123456789abcdef";
+static const char hex_upper[] = "0123456789ABCDEF";
 
-int _sprint_format_i32(char *s, int pos, i32 v) {
+
+int _fmt_u64(char *s, int pos, u64 v, int base, int wordcase) {
     if (v == 0) {
         s[pos++] = '0';
         return pos;
     }
-
-    int base = 10;
-
-    i32 temp;
-    bool negative = false;
-    
-    if (v < 0) {
-        negative = true;
-        temp = (~v) + 1;
-    } else {
-        temp = v;
+    const char *table = wordcase ? hex_upper : hex_lower;
+    char tmp[32];
+    int cnt = 0;
+    while (v) {
+        tmp[cnt++] = table[v % base];
+        v /= base;
     }
-
-    char buffer[32] = { 0 };
-
-    size_t count = 0;
-
-    while (temp > 0) {
-        int number_bit = temp % base;
-        buffer[count++] = print_at[0][number_bit];
-        temp /= base;
-    }
-
-    size_t halfcount = count & ~((size_t)1);
-    halfcount /= 2;
-
-    for (size_t i = 0; i < halfcount; i++) {
-        int ch = buffer[i];
-        buffer[i] = buffer[count - 1 - i];
-        buffer[count - 1 - i] = ch;
-    }
-
-    if (negative) {
-        s[pos++] = '-';
-    }
-
-    return _sprint_format_string(s, pos, buffer);
-}
-
-int _sprint_format_u32(char *s, int pos, u32 v) {
-    if (v == 0) {
-        s[pos++] = '0';
-        return pos;
-    }
-
-    int base = 10;
-
-    u32 temp;
-    bool negative = false;
-    
-    if (v < 0) {
-        negative = true;
-        temp = (~v) + 1;
-    } else {
-        temp = v;
-    }
-
-    char buffer[32] = { 0 };
-
-    size_t count = 0;
-
-    while (temp > 0) {
-        int number_bit = temp % base;
-        buffer[count++] = print_at[0][number_bit];
-        temp /= base;
-    }
-
-    size_t halfcount = count & ~((size_t)1);
-    halfcount /= 2;
-
-    for (size_t i = 0; i < halfcount; i++) {
-        int ch = buffer[i];
-        buffer[i] = buffer[count - 1 - i];
-        buffer[count - 1 - i] = ch;
-    }
-
-    if (negative) {
-        s[pos++] = '-';
-    }
-
-    return _sprint_format_string(s, pos, buffer);
-}
-
-int _sprint_format_i64(char *s, int pos, i64 v) {
-    if (v == 0) {
-        s[pos++] = '0';
-        return pos;
-    }
-
-    int base = 10;
-    i64 temp;
-    bool negative = false;
-    
-    if (v < 0) {
-        negative = true;
-        temp = (~v) + 1;
-    } else {
-        temp = v;
-    }
-
-    char buffer[32] = { 0 };
-
-    size_t count = 0;
-
-    while (temp > 0) {
-        int number_bit = temp % base;
-        buffer[count++] = print_at[0][number_bit];
-        temp /= base;
-    }
-
-    size_t halfcount = count & ~((size_t)1);
-    halfcount /= 2;
-
-    for (size_t i = 0; i < halfcount; i++) {
-        int ch = buffer[i];
-        buffer[i] = buffer[count - 1 - i];
-        buffer[count - 1 - i] = ch;
-    }
-
-    if (negative) {
-        s[pos++] = '-';
-    }
-
-    return _sprint_format_string(s, pos, buffer);
-}
-
-int _sprint_format_u64(char *s, int pos, u64 v) {
-    if (v == 0) {
-        s[pos++] = '0';
-        return pos;
-    }
-
-    int base = 10;
-    u64 temp;
-    bool negative = false;
-    
-    if (v < 0) {
-        negative = true;
-        temp = (~v) + 1;
-    } else {
-        temp = v;
-    }
-
-    char buffer[32] = { 0 };
-
-    size_t count = 0;
-
-    while (temp > 0) {
-        int number_bit = temp % base;
-        buffer[count++] = print_at[0][number_bit];
-        temp /= base;
-    }
-
-    size_t halfcount = count & ~((size_t)1);
-    halfcount /= 2;
-
-    for (size_t i = 0; i < halfcount; i++) {
-        int ch = buffer[i];
-        buffer[i] = buffer[count - 1 - i];
-        buffer[count - 1 - i] = ch;
-    }
-
-    if (negative) {
-        s[pos++] = '-';
-    }
-
-    return _sprint_format_string(s, pos, buffer);
-}
-
-int _sprint_format_hex(char *s, int pos, u64 v, i32 wordcase) {
-    if (v == 0) {
-        s[pos++] = '0';
-        return pos;
-    }
-
-    int base = 16;
-    u64 temp = v;
-    char buffer[32] = { 0 };
-    size_t count = 0;
-
-    while (temp > 0) {
-        int number_bit = temp % base;
-        buffer[count++] = print_at[wordcase][number_bit];
-        temp /= base;
-    }
-
-    size_t halfcount = count & ~((size_t)1);
-    halfcount /= 2;
-
-    for (size_t i = 0; i < halfcount; i++) {
-        int ch = buffer[i];
-        buffer[i] = buffer[count - 1 - i];
-        buffer[count - 1 - i] = ch;
-    }
-
-    return _sprint_format_string(s, pos, buffer);
-}
-
-int _sprint_format_binary(char *s, int pos, u64 v) {
-    if (v == 0) {
-        s[pos++] = '0';
-        return pos;
-    }
-
-    int base = 2;
-    u64 temp = v;
-    char buffer[65] = { 0 };
-    size_t count = 0;
-
-    while (temp > 0) {
-        int number_bit = temp % base;
-        buffer[count++] = print_at[0][number_bit];
-        temp /= base;
-    }
-
-    size_t halfcount = count & ~((size_t)1);
-    halfcount /= 2;
-
-    for (size_t i = 0; i < halfcount; i++) {
-        int ch = buffer[i];
-        buffer[i] = buffer[count - 1 - i];
-        buffer[count - 1 - i] = ch;
-    }
-
-    return _sprint_format_string(s, pos, buffer);
-}
-
-int _sprint_format_string(char *s, int pos, char *v) {
-    while (*v) {
-        s[pos++] = *v++;
-    }
+    while (cnt)
+        s[pos++] = tmp[--cnt];
     return pos;
 }
 
-void sprintf(char *s, int n, const char *format, ...) {
-    va_list vl;
-    va_start(vl, format);
-    sprintv(s, n, format, vl);
-    va_end(vl);
+int _fmt_i64(char *s, int pos, i64 v) {
+    if (v == 0) {
+        s[pos++] = '0';
+        return pos;
+    }
+    if (v < 0) {
+        s[pos++] = '-';
+        v = -v;
+    }
+    return _fmt_u64(s, pos, (u64)v, 10, 0);
 }
 
-void sprintv(char *s, int n, const char *format, va_list vl) {
+int _fmt_str(char *s, int pos, const char *v) {
+    if (!v) v = "(null)";
+    while (*v)
+        s[pos++] = *v++;
+    return pos;
+}
+
+
+int vsnprintf(char *s, size_t n, const char *fmt, va_list vl) {
+    if (!s || !n) return 0;
     int pos = 0;
-    for (int i = 0; format[i] != '\0'; i++) {
-        if (pos >= n) {
-            sys_panic("[PRINT] buffer is small", -ENOBUFS);
-        }
-        char ch = format[i];
-        switch (ch)
-        {
-        case '%': {
-            char next = format[++i];
-            switch (next)
-            {
-            case '%':
-                //klog_char(color, '%');
-                s[pos++] = '%';
-                break;
-            case 'd':
-                //klog_int32(color, va_arg(vl, i32));
-                pos = _sprint_format_i32(s, pos, va_arg(vl, i32));
-                break;
-            case 'q':
-                //klog_int64(color, va_arg(vl, i64));
-                pos = _sprint_format_i64(s, pos, va_arg(vl, i64));
-                break;
-            case 'x':
-                //klog_hex(color, va_arg(vl, u64), 0);
-                pos = _sprint_format_hex(s, pos, va_arg(vl, u64), 0);
-                break;
-            case 'X':
-                //klog_hex(color, va_arg(vl, u64), 1);
-                pos = _sprint_format_hex(s, pos, va_arg(vl, u64), 1);
-                break;
-            case 'p':
-                //klog_string(color, "0x");
-                pos = _sprint_format_string(s, pos, "0x");
-                // klog_hex(color, va_arg(vl, u64), 0);
-                pos = _sprint_format_hex(s, pos, va_arg(vl, u64), 0);
-                break;
-            case 'b':
-                // klog_binary(color, va_arg(vl, u64));
-                pos = _sprint_format_binary(s, pos, va_arg(vl, u64));
-                break;
-            case 's':
-                //klog_string(color, va_arg(vl, char*));
-                pos = _sprint_format_string(s, pos, va_arg(vl, char*));
-                break;
-            case 'c':
-                //klog_char(color, va_arg(vl, char));
-                s[pos++] = va_arg(vl, char);
-                break;
-            case 'u': {
-                switch (format[i+1])
-                {
-                case 'd':
-                    pos = _sprint_format_u32(s, pos, va_arg(vl, u32));
-                    ++i;
-                    break;
-                case 'q':
-                    pos = _sprint_format_u64(s, pos, va_arg(vl, u64));
-                    ++i;
-                    break;
-                default:
-                    s[pos++] = ch;
-                    s[pos++] = next;
-                    break;
-                }
-                break;
-            }
-            default:
-                s[pos++] = ch;
-                s[pos++] = next;
-                break;
-            }
-            
-            break;
-        }   // case '%':
-        default:
+    size_t end = n - 1;
+
+    for (int i = 0; fmt[i] && (size_t)pos < end; i++) {
+        char ch = fmt[i];
+        if (ch != '%') {
             s[pos++] = ch;
+            continue;
+        }
+
+        ch = fmt[++i];
+        if (!ch) break;
+        if (ch == '%') {
+            s[pos++] = '%';
+            continue;
+        }
+
+        int lflag = 0;
+        if (ch == 'l') {
+            lflag = 1; ch = fmt[++i];
+            if (ch == 'l') { lflag = 2; ch = fmt[++i]; }
+        }
+
+        switch (ch) {
+        case 'd':
+            if (lflag) pos = _fmt_i64(s, pos, va_arg(vl, i64));
+            else       pos = _fmt_i64(s, pos, va_arg(vl, i32));
+            break;
+        case 'u':
+            if (lflag) pos = _fmt_u64(s, pos, va_arg(vl, u64), 10, 0);
+            else       pos = _fmt_u64(s, pos, va_arg(vl, u32), 10, 0);
+            break;
+        case 'x':
+            if (lflag) pos = _fmt_u64(s, pos, va_arg(vl, u64), 16, 0);
+            else       pos = _fmt_u64(s, pos, va_arg(vl, u32), 16, 0);
+            break;
+        case 'X':
+            if (lflag) pos = _fmt_u64(s, pos, va_arg(vl, u64), 16, 1);
+            else       pos = _fmt_u64(s, pos, va_arg(vl, u32), 16, 1);
+            break;
+        case 'p':
+            s[pos++] = '0'; s[pos++] = 'x';
+            pos = _fmt_u64(s, pos, va_arg(vl, u64), 16, 0);
+            break;
+        case 's':
+            pos = _fmt_str(s, pos, va_arg(vl, const char*));
+            break;
+        case 'c':
+            s[pos++] = (char)va_arg(vl, int);
+            break;
+        case 'b':
+            pos = _fmt_u64(s, pos, va_arg(vl, u64), 2, 0);
+            break;
+        default:
+            s[pos++] = '%'; s[pos++] = ch;
             break;
         }
     }
+    s[pos] = '\0';
+    return pos;
 }
 
-void printf(const char *format, ...) {
+int snprintf(char *s, size_t n, const char *fmt, ...) {
     va_list vl;
-    va_start(vl, format);
-    printv(format, vl);
+    va_start(vl, fmt);
+    int r = vsnprintf(s, n, fmt, vl);
     va_end(vl);
+    return r;
 }
 
-void printv(const char *format, va_list vl) {
-    char *s = (char *)sys_vmalloc(null, KPRINT_MAX_BUFFER_SIZE);
-    memset(s, 0, KPRINT_MAX_BUFFER_SIZE);
-    sprintv(s, KPRINT_MAX_BUFFER_SIZE, format, vl);
-    sys_write(STDOUT, strlen(s), s);
-    sys_vfree(s);
+
+int vdprintf(int fd, const char *fmt, va_list vl) {
+    char *buf = (char *)sys_vmalloc(null, PRINT_BUF_SIZE);
+    if (!buf) return -1;
+    memset(buf, 0, PRINT_BUF_SIZE);
+    int len = vsnprintf(buf, PRINT_BUF_SIZE, fmt, vl);
+    sys_write(fd, len, buf);
+    sys_vfree(buf);
+    return len;
 }
 
-void perrf(const char *format, ...) {
+int dprintf(int fd, const char *fmt, ...) {
     va_list vl;
-    va_start(vl, format);
-    perrv(format, vl);
+    va_start(vl, fmt);
+    int r = vdprintf(fd, fmt, vl);
     va_end(vl);
-}
-
-void perrv(const char *format, va_list vl) {
-    char *s = (char *)sys_vmalloc(null, KPRINT_MAX_BUFFER_SIZE);
-    memset(s, 0, KPRINT_MAX_BUFFER_SIZE);
-    sprintv(s, KPRINT_MAX_BUFFER_SIZE, format, vl);
-    sys_write(STDERR, strlen(s), s);
-    sys_vfree(s);
+    return r;
 }
 
 
-int scanv(const char *format, va_list vl) {
+int vprintf(const char *fmt, va_list vl) {
+    return vdprintf(STDOUT, fmt, vl);
+}
+
+int printf(const char *fmt, ...) {
+    va_list vl;
+    va_start(vl, fmt);
+    int r = vdprintf(STDOUT, fmt, vl);
+    va_end(vl);
+    return r;
+}
+
+
+int vscanf(const char *fmt, va_list vl) {
     char rbuf[4096];
-    for (int i = 0; format[i] != '\0'; i++) {
-        char ch = format[i];
-        switch (ch)
-        {
-        case '%': {
-            char next = format[++i];
-            switch (next)
-            {
-            case 'd':
-                memset(rbuf, 0, 4096);
-                sys_read(STDIN, 4096, rbuf);
-                i32 r_l = strtol(rbuf);
-                memcpy(va_arg(vl, i32*), &r_l, sizeof(i32));
-                break;
-            case 'q':
-                memset(rbuf, 0, 4096);
-                sys_read(STDIN, 4096, rbuf);
-                i64 r_ll = strtoll(rbuf);
-                memcpy(va_arg(vl, i64*), &r_ll, sizeof(i64));
-                break;
-            case 's':
-                memset(rbuf, 0, 4096);
-                sys_read(STDIN, 4096, rbuf);
-                memcpy(va_arg(vl, char *), rbuf, min(strlen(rbuf), 4096));
-                break;
-            case 'u': {
-                switch (format[i+1])
-                {
-                case 'd':
-                    memset(rbuf, 0, 4096);
-                    sys_read(STDIN, 4096, rbuf);
-                    u32 r_ul = strtoul(rbuf);
-                    memcpy(va_arg(vl, u32*), &r_ul, sizeof(u32));
-                    ++i;
-                    break;
-                case 'q':
-                    memset(rbuf, 0, 4096);
-                    sys_read(STDIN, 4096, rbuf);
-                    u64 r_ull = strtoull(rbuf);
-                    memcpy(va_arg(vl, u64*), &r_ull, sizeof(u64));
-                    ++i;
-                    break;
-                default:
-                    break;
-                }
-                break;
+    for (int i = 0; fmt[i] != '\0'; i++) {
+        char ch = fmt[i];
+        if (ch != '%') continue;
+
+        ch = fmt[++i];
+        if (!ch) break;
+
+        int lflag = 0;
+        if (ch == 'l') {
+            lflag = 1; ch = fmt[++i];
+            if (ch == 'l') { lflag = 2; ch = fmt[++i]; }
+        }
+
+        switch (ch) {
+        case 'd': {
+            memset(rbuf, 0, 4096);
+            sys_read(STDIN, 4096, rbuf);
+            if (lflag) {
+                i64 v = strtoll(rbuf);
+                memcpy(va_arg(vl, i64*), &v, sizeof(i64));
+            } else {
+                i32 v = strtol(rbuf);
+                memcpy(va_arg(vl, i32*), &v, sizeof(i32));
             }
-            default:
-                break;
-            }
-            
             break;
-        }   // case '%':
+        }
+        case 'u': {
+            memset(rbuf, 0, 4096);
+            sys_read(STDIN, 4096, rbuf);
+            if (lflag) {
+                u64 v = strtoull(rbuf);
+                memcpy(va_arg(vl, u64*), &v, sizeof(u64));
+            } else {
+                u32 v = strtoul(rbuf);
+                memcpy(va_arg(vl, u32*), &v, sizeof(u32));
+            }
+            break;
+        }
+        case 's':
+            memset(rbuf, 0, 4096);
+            sys_read(STDIN, 4095, rbuf);
+            rbuf[4095] = '\0';
+            memcpy(va_arg(vl, char *), rbuf, min(strlen(rbuf), (size_t)255));
+            break;
         default:
             break;
         }
     }
+    return 0;
 }
 
-int scanf(const char *format, ...) {
+int scanf(const char *fmt, ...) {
     va_list vl;
-    va_start(vl, format);
-    scanv(format, vl);
+    va_start(vl, fmt);
+    int r = vscanf(fmt, vl);
     va_end(vl);
+    return r;
 }
