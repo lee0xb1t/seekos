@@ -62,6 +62,7 @@ i32 sys_debug_log() {
 
 i32 sys_user_exit(i32 exitcode) {
     sched_exit(exitcode);
+    return 0;
 }
 
 i32 sys_open(const char *path, int mode) {

@@ -117,12 +117,17 @@ static void builtin_echo(struct cmd_parse *p) {
     printf("\n");
 }
 
+static void builtin_exit(struct cmd_parse *p) {
+    sys_user_exit(0);
+}
+
 static const struct builtin builtins[] = {
     {"cd",   builtin_cd},
     {"ls",   builtin_ls},
     {"pwd",  builtin_pwd},
     {"echo", builtin_echo},
     {"help", builtin_help},
+    {"exit", builtin_exit},
 };
 
 static builtin_fn find_builtin(const char *name) {
@@ -182,7 +187,7 @@ static void run_external(struct cmd_parse *p) {
     if (pid == 0) {
         sys_execve(path, p->cnt, p->args);
         dprintf(STDERR, "exec '%s' failed\n", path);
-        sys_user_exit();
+        sys_user_exit(0);
     }
     sys_wait(pid);
 }

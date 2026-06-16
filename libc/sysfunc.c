@@ -7,9 +7,9 @@ void sys_debug_log() {
     syscall_0(SYSCALL_DEBUGLOG, ret);
 }
 
-void sys_user_exit() {
+void sys_user_exit(i32 code) {
     i32 ret;
-    syscall_0(SYSCALL_USEREXIT, ret);
+    syscall_1(SYSCALL_USEREXIT, code, ret);
     
     // noreturn
     asm volatile("hlt");

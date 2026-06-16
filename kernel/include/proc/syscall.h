@@ -48,7 +48,7 @@ typedef i32 (*syscall_func_t)();
 void syscall_init();
 
 i32 sys_debug_log();
-i32 sys_user_exit();
+i32 sys_user_exit(i32 code);
 
 
 #define O_READ              0

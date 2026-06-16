@@ -94,6 +94,13 @@ __attribute__((used, section(".limine_requests_end")))
 static volatile u64 limine_requests_end_marker[] = LIMINE_REQUESTS_END_MARKER;
 
 
+//
+
+void __core_proc();
+
+//
+
+
 void kernel_main() {
     serial_init();
 
@@ -313,10 +320,20 @@ void kernel_main() {
     //...
     smp_init();
 
+    task_t *core_task = task_create("core", __core_proc, 0, TASK_KERNEL_MODE);
+    sched_add(core_task);
+
     char *init_envp[] = {"PATH=/bin", null};
     sched_execve("/bin/shell", 0, null, "/", 1, init_envp);
 
     isr_enable_interrupts();
 
     for(;;) __hang();
+}
+
+void __core_proc() {
+
+    for (;;) {
+        kevent_dispatch();
+    }
 }

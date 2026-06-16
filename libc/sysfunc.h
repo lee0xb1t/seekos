@@ -26,7 +26,7 @@
 
 
 void sys_debug_log();
-void sys_user_exit();
+void sys_user_exit(i32 code);
 
 i32 sys_open(const char *path, int mode);
 i32 sys_close(i32 handle);

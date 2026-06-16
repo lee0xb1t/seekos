@@ -57,9 +57,7 @@ void sched_init() {
 
 void __idle_proc(void *cpudata) {
     (void)cpudata;
-    for (;;) {
-        __hang();
-    }
+    for(;;) __hang();
 }
 
 void __timer_switch_context(trapframe_t *trapframe) {
