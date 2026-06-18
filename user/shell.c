@@ -179,6 +179,16 @@ static char *read_line(void) {
     return input_buf;
 }
 
+static int try_resolve(const char *cmd, char *out, size_t outsz) {
+    resolve_path(cmd, out, outsz);
+    FILE *fh = open(out, O_READ);
+    if (fh) {
+        close(fh);
+        return 1;
+    }
+    return 0;
+}
+
 static void run_external(struct cmd_parse *p) {
     char path[256];
     resolve_path(p->args[0], path, sizeof(path));
@@ -211,7 +221,11 @@ int main(int argc, char **argv, char **envp) {
         if (fn) {
             fn(&parse);
         } else {
-            run_external(&parse);
+            char path[256];
+            if (try_resolve(parse.args[0], path, sizeof(path)))
+                run_external(&parse);
+            else
+                dprintf(STDERR, "%s: command not found\n", parse.args[0]);
         }
 
         parse_free(&parse);

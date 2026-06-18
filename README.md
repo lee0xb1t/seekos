@@ -12,8 +12,8 @@ A project to learn osdev
 * interrupt manager
 * RR scheduler
 * framebuffer, keyboard
-* fork, execve, wait api
-* a simple shell
+* **fork, execve, wait api**
+* **A simple shell**
 
 
 ## DEBUG
@@ -35,6 +35,5 @@ make run
 
 ### TODO
 
-* redesign lock
 * more libc interface
 
